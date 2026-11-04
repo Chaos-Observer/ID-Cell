@@ -1,0 +1,328 @@
+{
+  "version": "v0.11",
+  "seed": 11,
+  "total": 26,
+  "passed": 26,
+  "failed": 0,
+  "scenarios": [
+    {
+      "name": "discovery_announce_schedule",
+      "category": "discovery",
+      "status": "passed",
+      "details": {
+        "initial_delay": 2.261897767549093,
+        "announcements": 57,
+        "confirmed_interval": 10
+      }
+    },
+    {
+      "name": "discovery_probe_dedup_forward",
+      "category": "discovery",
+      "status": "passed",
+      "details": {
+        "descriptor_fetches": 2,
+        "forwarded_hop": 1,
+        "relay_src": 10,
+        "relay_dst": 20,
+        "send_fault": "E_SEND"
+      }
+    },
+    {
+      "name": "frame_std_rt_roundtrip",
+      "category": "frame",
+      "status": "passed",
+      "details": {
+        "statuses": [
+          "OK_STD",
+          "OK_RT"
+        ],
+        "header_bytes": 36
+      }
+    },
+    {
+      "name": "frame_stream_resilience",
+      "category": "frame",
+      "status": "passed",
+      "details": {
+        "splits_checked": 87,
+        "oversize_status": "BAD_LENGTH",
+        "payload_materializations": 0,
+        "bad_len_recovery": [
+          "12345"
+        ]
+      }
+    },
+    {
+      "name": "frame_auth_crc_errors",
+      "category": "frame",
+      "status": "passed",
+      "details": {
+        "valid": "OK_STD",
+        "tampered_auth": "BAD_AUTH",
+        "tampered_crc": "BAD_CRC"
+      }
+    },
+    {
+      "name": "sleep_deadlines",
+      "category": "sleep",
+      "status": "passed",
+      "details": {
+        "ordinary_offline_at": 15,
+        "scheduled_offline_at": 30,
+        "wake_action": "CHECK_IN",
+        "receive_valid": "ONLINE",
+        "ordinary_after_offline": "OFFLINE",
+        "checkin_resume": "ONLINE"
+      }
+    },
+    {
+      "name": "sleep_mailbox_reauth",
+      "category": "sleep",
+      "status": "passed",
+      "details": {
+        "executed": [
+          "command"
+        ],
+        "expired": "E_EXPIRED",
+        "old_session": "E_SESSION",
+        "suspended": "E_SUSPENDED",
+        "new_context_old": "E_BINDING",
+        "nan": "E_RANGE"
+      }
+    },
+    {
+      "name": "contract_match_constraints",
+      "category": "contract",
+      "status": "passed",
+      "details": {
+        "candidates": [
+          "a",
+          "b"
+        ],
+        "rejected_reasons": [
+          "E_DOMAIN",
+          "E_TYPE",
+          "E_PERMISSION"
+        ]
+      }
+    },
+    {
+      "name": "contract_negotiate_bind_lifecycle",
+      "category": "contract",
+      "status": "passed",
+      "details": {
+        "T_pub": 5,
+        "stale_status": "E_NEGOTIATE",
+        "capability_violation": "E_CAPABILITY"
+      }
+    },
+    {
+      "name": "schema_namespace_change",
+      "category": "schema",
+      "status": "passed",
+      "details": {
+        "schema_id": 7696581394441,
+        "new_schema_id": 7696581394442,
+        "unknown_critical": "E_UNKNOWN_CRITICAL"
+      }
+    },
+    {
+      "name": "distributed_controller_isolation",
+      "category": "distributed",
+      "status": "passed",
+      "details": {
+        "controller_one": "E_OFFLINE",
+        "controller_two": "E_OK",
+        "shared_value": 42,
+        "periods": [
+          5,
+          12
+        ],
+        "outside_contract": "E_CAPABILITY"
+      }
+    },
+    {
+      "name": "distributed_relay_loop_tamper",
+      "category": "distributed",
+      "status": "passed",
+      "details": {
+        "terminal_hop_limit": 0,
+        "normal": "OK_STD",
+        "tamper_status": "BAD_AUTH"
+      }
+    },
+    {
+      "name": "security_handover_release",
+      "category": "security",
+      "status": "passed",
+      "details": {
+        "handover": "release",
+        "pre_ack": "E_NOT_ACTIVE",
+        "post_ack": "E_OK"
+      }
+    },
+    {
+      "name": "security_handover_ttl",
+      "category": "security",
+      "status": "passed",
+      "details": {
+        "old_deadline": 10,
+        "activation": "E_PENDING_ACK"
+      }
+    },
+    {
+      "name": "security_authority_proof",
+      "category": "security",
+      "status": "passed",
+      "details": {
+        "without_proof": "E_UNTRUSTED_AUTHORITY",
+        "with_proof": "E_WAIT_RELEASE"
+      }
+    },
+    {
+      "name": "security_restart_fence",
+      "category": "security",
+      "status": "passed",
+      "details": {
+        "persisted_grant_epoch": 3,
+        "old_write": "E_NOT_ACTIVE",
+        "new_write": "E_OK"
+      }
+    },
+    {
+      "name": "frame_golden_vectors_and_tamper",
+      "category": "frame",
+      "status": "passed",
+      "details": {
+        "golden_vectors": 2,
+        "tamper_offsets": [
+          6,
+          12,
+          20,
+          30,
+          39
+        ],
+        "statuses": [
+          "BAD_AUTH",
+          "BAD_AUTH",
+          "BAD_AUTH",
+          "BAD_AUTH",
+          "BAD_AUTH"
+        ]
+      }
+    },
+    {
+      "name": "frame_version_type_profile_negative",
+      "category": "frame",
+      "status": "passed",
+      "details": {
+        "statuses": [
+          "BAD_VERSION",
+          "BAD_PROFILE",
+          "BAD_TYPE"
+        ],
+        "compatible_minor": "OK_STD",
+        "rt_type": "READ",
+        "rt_profile": "PROF_RT"
+      }
+    },
+    {
+      "name": "discovery_recovery_cache_scope_rate",
+      "category": "discovery",
+      "status": "passed",
+      "details": {
+        "recovery": "E_OK",
+        "cache_capacity": 2,
+        "ttl_retry": true,
+        "scope_forward": null,
+        "paced_interval": 1.2579544029403025
+      }
+    },
+    {
+      "name": "sleep_mailbox_duplicate_range",
+      "category": "sleep",
+      "status": "passed",
+      "details": {
+        "executions": 1,
+        "duplicate": "E_OK",
+        "range": "E_RANGE",
+        "capability": "E_CAPABILITY"
+      }
+    },
+    {
+      "name": "contract_bootstrap_transcript_tamper",
+      "category": "contract",
+      "status": "passed",
+      "details": {
+        "tampered": [
+          "binding_id",
+          "point",
+          "capability",
+          "schema"
+        ],
+        "statuses": [
+          "E_BOOTSTRAP",
+          "E_BOOTSTRAP",
+          "E_BOOTSTRAP",
+          "E_BOOTSTRAP"
+        ]
+      }
+    },
+    {
+      "name": "distributed_partition_shared_executor",
+      "category": "distributed",
+      "status": "passed",
+      "details": {
+        "before_ttl": "E_OK",
+        "old_at_ttl": "E_FENCING",
+        "partition_new": "E_OFFLINE",
+        "recovered": "E_OK"
+      }
+    },
+    {
+      "name": "distributed_wire_dedup_bounded",
+      "category": "distributed",
+      "status": "passed",
+      "details": {
+        "processed_before_expiry": 1,
+        "capacity": 2,
+        "ttl_retry": true
+      }
+    },
+    {
+      "name": "security_expired_and_released_revival",
+      "category": "security",
+      "status": "passed",
+      "details": {
+        "expired_revival": "E_EXPIRED",
+        "released_revival": "E_RELEASED",
+        "higher_epoch": "E_PENDING_ACK"
+      }
+    },
+    {
+      "name": "security_grant_fingerprint_idempotency",
+      "category": "security",
+      "status": "passed",
+      "details": {
+        "duplicate_deadline": 10,
+        "fingerprint_conflicts": [
+          "E_GRANT_CONFLICT",
+          "E_GRANT_CONFLICT",
+          "E_GRANT_CONFLICT"
+        ],
+        "pending_duplicate": "E_WAIT_RELEASE"
+      }
+    },
+    {
+      "name": "security_restart_authority_proof",
+      "category": "security",
+      "status": "passed",
+      "details": {
+        "same_epoch_no_proof": "E_UNTRUSTED_AUTHORITY",
+        "higher_epoch_no_proof": "E_UNTRUSTED_AUTHORITY",
+        "higher_epoch_proof": "E_PENDING_ACK",
+        "persisted_authority": "auth-b"
+      }
+    }
+  ]
+}

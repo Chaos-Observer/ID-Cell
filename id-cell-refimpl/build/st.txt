@@ -1,0 +1,201 @@
+﻿========================================================================
+ ID-CELL 参考实现一致性自测
+========================================================================
+
+[1. CRC-16/CCITT-FALSE 向量]
+  PASS  check("123456789") = 0x29B1
+  PASS  空输入 = 0xFFFF
+  PASS  单字节 0x00 = 0xE1F0
+
+[2. 身份：独立生成、唯一、可打印]
+  PASS  不同种子生成不同 DID
+  PASS  同种子生成同一 DID（可复现）
+  PASS  DID 字节确实不同
+  PASS  厂商前缀写入 DID 前两字节
+  PASS  DID 字符串长度为 17
+  PASS  DID 字符串第 9 位是分隔符
+  PASS  DID 字符串以 '\0' 结尾
+  PASS  DID 文本形式逐字节对应 b[0..7]
+
+[3. 单位转换分级（T0–T4）]
+  PASS  同单位转换成功
+  PASS  同单位值不变
+  PASS  同单位判为 T1
+  PASS  mm → m 成功
+  PASS  1500 mm = 1.5 m
+  PASS  mm → m 判为 T1
+  PASS  Cel → [degF] 成功
+  PASS  100 Cel = 212 [degF]
+  PASS  Cel → [degF] 判为 T2
+  PASS  m → s 返回 E_UNIT
+  PASS  kPa_abs 不在核心子集内，返回 E_UNIT
+  PASS  未知单位返回 E_UNIT
+
+[3b. 量种表与 UCUM 单位子集（§24）]
+  PASS  量种表与单位表交叉校验通过
+  PASS  量种表为 24 项
+  PASS  量种名可取
+  PASS  force 量种名正确
+  PASS  force 的规范单位为 N
+  PASS  torque 的规范单位为 N.m
+  PASS  按名反查量种成功
+  PASS  反查结果为 acceleration
+  PASS  量种名不区分大小写
+  PASS  未知量种名返回 E_NODEV
+  PASS  N 的量种可取
+  PASS  N 属力量种
+  PASS  N.m 的量种可取
+  PASS  N.m 属力矩量种
+  PASS  g 的量种可取
+  PASS  g 是克（质量），不是重力加速度
+  PASS  [g] 的量种可取
+  PASS  [g] 是标准重力加速度
+  PASS  力量纲向量可取
+  PASS  力矩量纲向量可取
+  PASS  力与力矩的量纲向量完全相同（量纲不足以区分）
+  PASS  力 → 力矩被拒（量种不同，尽管量纲相同）
+  PASS  无量纲比值 / 平面角 / 数据量三者量纲相同
+  PASS  比值 → 角度被拒（量种不同）
+  PASS  私有单位不在核心子集内
+  PASS  私有单位的量种不可解
+  PASS  含标准码的私有码仍不在子集内
+  PASS  私有码不参与换算
+  PASS  相同私有码按恒等处理
+  PASS  相同私有码值不变
+  PASS  m/s2 → mm/s2 成功
+  PASS  9.80665 m/s2 = 9806.65 mm/s2
+  PASS  m/s2 → mm/s2 判为 T1
+  PASS  Cel → [degF] 成功
+  PASS  0 Cel = 32 [degF]
+  PASS  Cel → [degF] 判为 T2
+  PASS  量种表校验（未篡改）通过
+
+[3c. 值类型协商：成本序与可行性过滤（§24.8）]
+  PASS  bool 成本序最低
+  PASS  1 B 整数成本低于 2 B 整数
+  PASS  4 B 整数成本低于 f32（同字节但表达力低）
+  PASS  f32 成本低于 8 B 整数
+  PASS  8 B 整数成本低于 f64
+  PASS  string 无固定成本，不可协商
+  PASS  i32 为 4 字节
+  PASS  f32 为 4 字节
+  PASS  f64 为 8 字节
+  PASS  i32×10^-3 可承载 ±160（分辨率 0.001）
+  PASS  i32×10^-9 范围仅 ±2.147，装不下 ±160（分辨率与范围绑死）
+  PASS  i16×10^-3 范围仅 ±32.77，装不下 ±160
+  PASS  i16×10^-2 可承载温度 ±85（分辨率 0.01）
+  PASS  双方共有 i32 与 f64 时协商成功
+  PASS  协商结果取成本更低的 i32
+  PASS  协商结果的 scale 为 10^-3
+  PASS  同为 i32 但 scale 不同不构成共同项
+  PASS  候选集含不可行项时协商仍成功
+  PASS  跳过装不下值域的低成本类型，选可行的 i32（先过滤后取最小）
+  PASS  交集为空返回 E_CONV
+  PASS  可读形式含类型名
+  PASS  可读形式含缩放指数
+  PASS  浮点类型的可读形式无缩放后缀
+  PASS  加入接受类型
+  PASS  重复加入不报错
+  PASS  重复项不重复登记
+  PASS  加入第二项
+  PASS  接受集合计数正确
+
+[4. 帧编解码往返]
+  PASS  帧编码成功
+  PASS  帧长 = 34 + 载荷 + 4
+  PASS  SYNC 高字节 0xA5
+  PASS  SYNC 低字节 0xA5
+  PASS  VER 字节
+  PASS  TYPE 字节
+  PASS  TRAILER 高字节 0x5A
+  PASS  TRAILER 低字节 0xA5
+  PASS  帧解码成功
+  PASS  解码消耗字节数 = 帧长
+  PASS  TYPE 往返一致
+  PASS  SEQ 往返一致
+  PASS  TXN 往返一致
+  PASS  GROUP 往返一致
+  PASS  48 位时间戳往返一致（不被截断）
+  PASS  SRC 往返一致
+  PASS  DST 往返一致
+  PASS  载荷长度往返一致
+  PASS  载荷内容往返一致
+  PASS  TLV 索引往返一致
+  PASS  TLV 值往返一致
+  PASS  TLV 来源等级往返一致
+  PASS  TLV 链遍历正常结束
+  PASS  两个 TLV 都被解出
+  PASS  CRC 被破坏的帧被拒绝
+  PASS  载荷被破坏的帧被拒绝
+  PASS  TRAILER 被破坏的帧被拒绝
+  PASS  载荷不是合法 TLV 链的帧被拒绝
+  PASS  半截帧返回「需要更多数据」
+
+[5. 注册：三种语义与身份冲突]
+  PASS  节点创建成功
+  PASS  未注册设备类型时能力注册仍然成功（X1）
+  PASS  重复注册同一能力点返回 E_IDCONFLICT
+  PASS  描述符版本随注册递增
+  PASS  需求注册成功
+  PASS  设备类型注册成功
+  PASS  链路画像可获取（未绑适配器时返回默认值）
+  PASS  未绑适配器时介质为 UNKNOWN
+  PASS  未绑适配器时拓扑为 P2P
+
+[6. 六段管道与绑定契约]
+  PASS  六段管道跑通并建立绑定
+  PASS  契约含 binding_id
+  PASS  契约含 cap_list
+  PASS  契约含 arb_domain
+  PASS  契约含 lease_ttl
+  PASS  契约含 owner_token
+  PASS  契约含 desc_version
+  PASS  契约有逐点条目可校验类型
+  PASS  契约记录协商出的 i32（双方共同支持且成本更低）
+  PASS  契约记录协商出的 scale 为 10^-3
+  PASS  双方契约记录的值类型一致
+  PASS  提供方侧同样持有契约
+  PASS  双方契约能力点数一致
+  PASS  双方契约 binding_id 一致
+  PASS  双方契约 owner_token 一致
+  PASS  双方契约逐点降级语义一致
+  PASS  逐点降级语义来自提供方声明的 fail_action
+  PASS  双方契约逐点 T_pub 一致
+  PASS  T_pub = max(T_prod=20, T_want=20) = 20ms
+  PASS  需求方管道阶段为 RUNNING
+  PASS  提供方管道阶段为 RUNNING
+  PASS  按可读名找到对端
+  PASS  按名找到的就是那台设备
+  PASS  按名找不到时返回 E_NODEV
+  PASS  脱敏串不含完整 owner_token
+  PASS  脱敏串带脱敏标注
+  PASS  脱敏串保留可核对的短前缀
+  PASS  缺意图的写被本地拒绝（E_PERM）
+  PASS  令牌不匹配的写被拒绝（E_PERM）
+  PASS  可取到 owner_token
+  PASS  合法写本地预检通过
+  PASS  写结果回调被送达
+  PASS  合法写的裁决为 OK
+  PASS  提供方确实执行了一次写入
+  PASS  越界写在本地预检阶段看不出问题
+  PASS  越界写的裁决被送达
+  PASS  越界写的裁决为 E_RANGE
+  PASS  E_RANGE 裁决携带值域
+  PASS  值域为 [-40, 85]
+  PASS  错误体携带实际值 999
+  PASS  越界的写没有触达设备（不截断、不钳位）
+  PASS  租约过期后的写返回 E_LEASE
+
+[7. 不匹配路径（E_NOMATCH）]
+  PASS  量种不符的需求不会建立绑定（无 E_NOMATCH 误配）
+
+[7b. 量种红线：量纲相同但量种不同不得匹配（FR-081/FR-082）]
+  PASS  力与力矩（量纲相同、量种不同）不建立绑定
+  PASS  力 → 力矩换算被拒（E_UNIT）
+
+[8. 周期红线：T_pub > T_stale 必须绑定失败]
+  PASS  T_prod(1000ms) 超过 T_stale(100ms) 时绑定失败，不做降级妥协
+
+========================================================================
+ 通过 172 项，失败 0 项
+========================================================================

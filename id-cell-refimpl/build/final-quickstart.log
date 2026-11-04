@@ -1,0 +1,113 @@
+========================================================================
+ ID-CELL 快速应用示例：虚拟 IMU + 机器人控制器
+ v0.11 线格式：36B 固定头 + LEN payload + 可选16B AUTH_TAG + CRC + TRAILER
+ 六段管道 DISCOVER → DESCRIBE → MATCH → NEGOTIATE → AUTHORIZE → BIND
+========================================================================
+
+[1] 物理链路
+    介质      = loopback
+    拓扑      = 点对点
+    T_link_min= 0 ms
+
+[2] 提供方注册能力点（能力描述符 = 能力的唯一权威）
+    已注册 4 个能力点，描述符版本 v5
+    设备类型（可选轨）：IMU-6DOF v3
+
+[3] 需求方注册需求（只说「我要什么」，不含设备身份）
+    需求：量=机器人需要的加速度 单位=m/s2 T_want=20ms T_stale=500ms
+
+[4] 执行入口：反复调用 idcell_node_poll(node, now_ms)
+    （设备侧唯一入口；不得在中断上下文调用）
+
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.1200  ts=40000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.4620  ts=410000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.5500  ts=1210000us  来源=measured  质量=good
+[5] 绑定契约（§09.7 十字段，双方各持一份、冲突取更严者）
+    binding_id  = 0x68A49BC7
+    peer_pair   = FC399C63-B0D4CF76
+    cap_list    = 1 个能力点
+    per_point   :
+        index=0x0100 sub=0  unit=m/s2     T_pub=20  ms P1  降级=hold
+    arb_domain  = 0x2EB00223
+    lease_ttl   = 3000ms
+    owner_token = 0x13C7…（脱敏）
+    desc_version= 5
+    provenance  = measured（实测）
+
+[6] 实时数据流（周期发布；值未更新则不发，绝不重复旧值伪装刷新）
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.6710  ts=2010000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.6890  ts=2030000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7070  ts=2050000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7240  ts=2070000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7390  ts=2090000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7550  ts=2110000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7690  ts=2130000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7820  ts=2150000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7940  ts=2170000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8050  ts=2190000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8150  ts=2210000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8240  ts=2230000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8310  ts=2250000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8380  ts=2270000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8430  ts=2290000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8460  ts=2310000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8490  ts=2330000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8500  ts=2350000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8500  ts=2370000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8480  ts=2390000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8450  ts=2410000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8410  ts=2430000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8350  ts=2450000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8290  ts=2470000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8210  ts=2490000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8110  ts=2510000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.8010  ts=2530000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7900  ts=2550000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7770  ts=2570000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7630  ts=2590000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7490  ts=2610000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7330  ts=2630000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7170  ts=2650000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.7000  ts=2670000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.6830  ts=2690000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.6640  ts=2710000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.6460  ts=2730000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.6270  ts=2750000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.6070  ts=2770000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.5870  ts=2790000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.5670  ts=2810000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.5470  ts=2830000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.5270  ts=2850000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.5080  ts=2870000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.4880  ts=2890000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.4680  ts=2910000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.4490  ts=2930000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.4310  ts=2950000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.4130  ts=2970000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.3950  ts=2990000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.3780  ts=3010000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.3620  ts=3030000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.3470  ts=3050000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.3330  ts=3070000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.3200  ts=3090000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.3070  ts=3110000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.2960  ts=3130000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.2860  ts=3150000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.2770  ts=3170000us  来源=measured  质量=good
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.2690  ts=3190000us  来源=measured  质量=good
+
+[7] 写操作（SEC-019：必须携带 owner_token 与意图结构）
+    写是异步的：idcell_node_write() 只做本地预检并发出请求，
+    最终裁决由提供方做出，经写结果回调送达（见下方 [机器人] 行）。
+    ① 带令牌 + 带意图 -> 本地预检 OK
+        [IMU] 收到写请求 index=0x0200 value=26.000 intent="温漂补偿：写入零点偏置"
+        [机器人] 写裁决 index=0x0200 -> OK
+        [机器人] FC399C63-B0D4CF76  index=0x0100  value=0.2660  ts=3210000us  来源=measured  质量=good
+    ② 缺意图串        -> 本地预检 E_PERM（本地直接拒绝，不会发出请求）
+    ③ 令牌不匹配      -> 本地预检 E_PERM（本地直接拒绝）
+    ④ 值越界（999）   -> 本地预检 OK（本地查不出值域，越界由提供方裁决）
+        [机器人] 写裁决 index=0x0200 -> E_RANGE（值 999.000 超出值域 [-40.000, 85.000]）
+
+========================================================================
+ 管道跑通：DISCOVER → DESCRIBE → MATCH → NEGOTIATE → AUTHORIZE → BIND
+========================================================================
