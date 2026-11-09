@@ -94,6 +94,13 @@ extern "C" {
 #define IDCELL_CRED_LEN         32
 #endif
 
+/*
+ * v0.12：协议保留的服务点区（0xFE00 ~ 0xFEFF，§26）。
+ * 用户能力点 MUST NOT 占用此区；否则未来补服务点时会与既有描述符冲突。
+ * 0xFE00 = 时钟服务点：只读，返回设备本地单调计数。
+ */
+#define IDCELL_SVC_CLOCK_INDEX  0xFE00u
+
 /* ---------------------------------------------------------------- 错误码 */
 
 typedef enum {
@@ -739,6 +746,74 @@ void idcell_node_set_event_sink(idcell_node_t *n, idcell_event_fn fn, void *ud);
 
 /* 写结果回调（需求方侧）：提供方的最终裁决经此送达 */
 void idcell_node_set_write_result_sink(idcell_node_t *n, idcell_write_result_fn fn, void *ud);
+
+/* ---------------------------------------------------------------- 时钟服务 */
+
+/*
+ * v0.12：设备本地单调计数的一次采样（§26.2）。
+ *
+ * counter 是该节点的**本地单调计数**，不是墙钟，也不是被拉齐到任何
+ * 全局时间轴的「同步时间」。tick_ns 声明一个计数单位等于多少纳秒；
+ * 不允许协议默认 µs——只有设备自己知道它的计数时基。
+ *
+ * epoch 在设备重启或计数初始化时 MUST 递增；跨 epoch 的 counter
+ * MUST NOT 参与任何差值或补偿计算。
+ */
+typedef struct {
+    uint64_t counter;      /* 本地单调计数 */
+    uint32_t tick_ns;      /* 一个计数单位 = tick_ns 纳秒；0 表示未声明 */
+    uint16_t epoch;        /* 计数域世代；重启 / 初始化时递增 */
+    uint8_t  quality;      /* IDCELL_PROV_* 子集：0 参考源 / 1 已校准 / 2 自由运行 */
+} idcell_clock_sample_t;
+
+typedef int (*idcell_clock_fn)(void *ud, idcell_clock_sample_t *out);
+
+/*
+ * 注册本地时钟源。不注册时设备不提供时钟服务点，READ 返回 E_NODEV。
+ * 须在 BIND 前调用（服务点不是普通能力点，不进 MATCH）。
+ */
+void idcell_node_set_clock_source(idcell_node_t *n, idcell_clock_fn fn, void *ud);
+
+/*
+ * 一次单跳测量的结果（§26.3）。全部时间量以纳秒表示。
+ *
+ * rtt_ns          发起端单侧时钟量得的往返时延。不需要跨节点同步即可得到。
+ * offset_ns       theta = counter_ns - (t0_ns + rtt_ns/2)。
+ *                 正值表示设备计数轴领先发起端；负值表示滞后。
+ * uncertainty_ns  由 tick_ns 与发起端取样分辨率合成的测不准上界。
+ */
+typedef struct {
+    uint64_t counter;         /* 设备回传的本地计数原值 */
+    uint32_t tick_ns;
+    uint16_t epoch;
+    uint8_t  quality;
+    uint64_t rtt_ns;
+    int64_t  offset_ns;
+    uint32_t uncertainty_ns;
+} idcell_clock_measure_t;
+
+/*
+ * 发起一次单跳时钟测量（需求方侧，需已建立绑定）。
+ * 返回 OK 表示请求已发出；结果须用 idcell_node_measure_clock_result 轮询。
+ * 本函数只测「发起端 ↔ 单个对端」的一段，不做转发、不改写 SRC/DST（§26.4）。
+ */
+int idcell_node_measure_clock(idcell_node_t *n, const idcell_did_t *peer,
+                              uint32_t now_ms);
+
+/*
+ * 取测量结果：1 = 已就绪，0 = 等待响应，负值 = 错误（无对端 / 租约失效）。
+ * 就绪后再次调用仍返回同一结果，直到发起下一次测量。
+ */
+int idcell_node_measure_clock_result(const idcell_node_t *n,
+                                      const idcell_did_t *peer,
+                                      idcell_clock_measure_t *out);
+
+/*
+ * v0.12：读数补偿（§26.5）——把设备本地计数映射到发起端计数轴。
+ * 返回 ns；调用方 MUST 先确认样本的 epoch 与测量结果的 epoch 相同，
+ * 跨 epoch 的 counter 不可比较。本函数不修改任何一端的时钟。
+ */
+int64_t idcell_clock_map_ns(const idcell_clock_measure_t *m, uint64_t counter);
 
 /*
  * 设备侧执行入口。所有收帧、定时器、周期发布、心跳、租约维护都在这里。

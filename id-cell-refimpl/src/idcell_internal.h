@@ -140,6 +140,9 @@ double   idcell_get_f64(const uint8_t *p);
 /* 公共/授权描述分离：digest 只对规范化 TLV 字节计算，不含结构体 padding/NUL。 */
 #define IDCELL_TLV_PUBLIC_DIGEST 0x59
 #define IDCELL_TLV_AUTH_DIGEST   0x5A
+/* v0.12：时钟服务点的计数回传（§26.2）。载荷 15 字节定长：
+ * u64 counter + u32 tick_ns + u16 epoch + u8 quality。 */
+#define IDCELL_TLV_CLOCK         0x5B
 
 #define IDCELL_DISCOVER_ANNOUNCE 1
 #define IDCELL_DISCOVER_PROBE    2
@@ -411,6 +414,19 @@ typedef struct {
     uint32_t   checkin_ms;
     uint32_t   max_wake_latency_ms;
 
+    /* v0.12：单跳时钟测量（§26.3）。每对端至多一次未决测量。 */
+    uint8_t    meas_pending;
+    uint8_t    meas_valid;
+    uint16_t   meas_txn;
+    uint64_t   meas_t0_ns;          /* 发起端本地发出时刻 */
+    uint64_t   meas_counter;        /* 对端回传的计数原值 */
+    uint32_t   meas_tick_ns;
+    uint16_t   meas_epoch;
+    uint8_t    meas_quality;
+    uint64_t   meas_rtt_ns;
+    int64_t    meas_offset_ns;
+    uint32_t   meas_uncertainty_ns;
+
     /* 重试与拉取节拍 */
     uint32_t   next_retry_ms;   /* 管道重试节拍 */
     uint8_t    asked_desc;      /* 已向该对端拉取过描述符 */
@@ -543,6 +559,8 @@ struct idcell_node {
     void          *value_ud;
     idcell_quality_fn quality_fn;   /* v0.8：质量码来源（可选） */
     void          *quality_ud;
+    idcell_clock_fn clock_fn;       /* v0.12：时钟服务点来源（可选） */
+    void          *clock_ud;
     idcell_set_fn   set_fn;
     void          *set_ud;
     idcell_data_fn  data_fn;

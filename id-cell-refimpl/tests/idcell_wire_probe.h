@@ -142,6 +142,8 @@
 #define IDWP_TLV_OWNER      0x2A
 #define IDWP_TLV_RESULT     0x34
 #define IDWP_TLV_BIND_ID    0x36
+/* v0.12：时钟服务点计数回传（§26.2），15 字节定长 */
+#define IDWP_TLV_CLOCK       0x5B
 #define IDWP_TLV_ERR_CODE    0x70
 #define IDWP_TLV_ERR_REASON  0x74
 #define IDWP_TLV_ERR_RANGE_LO 0x76

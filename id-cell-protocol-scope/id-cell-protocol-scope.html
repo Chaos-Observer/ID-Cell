@@ -153,14 +153,15 @@ sup a{color:var(--accent);text-decoration:none;font-size:.75em;font-weight:700;}
 <header class="masthead">
   <div class="eyebrow">ID-CELL · Scope Definition &amp; Requirements Spec</div>
   <h1>统一设备间通讯协议：做到什么程度才算成立</h1>
-  <p class="standfirst">一份范围界定 + 需求规格文档。核心结论是——「做到什么程度」不是功能清单问题，而是<strong>零配置接入</strong>问题：协议本体冻结哪几件事、生态互通的可验证判据是什么、哪些东西明确推迟。文中对即插即用六段管道、插件模型映射、信息漫游、接入状态机、保活三时钟、同步周期协商、自锁机制、权限与理解度的绑定关系、多模态映射、源竞争仲裁、ATE 格式与帧结构逐条给出可实现的定稿口径；并在此之上落成完整需求层——<strong>106 条功能需求、60 条非功能需求、76 条安全需求、三档一致性等级</strong>，每条需求均可追溯到设计决策、规范条款、协议帧与测试用例。<strong>v0.4 追加四章</strong>：权限模型完整设计、要不要建物模型的分层决策、协议定位与差异化论证，以及 66 行外部机制借鉴清单。<strong>v0.5 追加一章</strong>：<strong>§22 场景驱动推导</strong>——从十个未在文档中出现过的应用场景出发反推协议需求，把 60 项推导结论逐条判为「已被覆盖 / 需要改写 / 需要新增 / 明确排除」四类，并据此补出 FR-060 ~ FR-071、NFR-045 ~ NFR-051、SEC-057 ~ SEC-062 共 25 条新条目。<strong>v0.6 追加两节</strong>：<strong>§05.15 与 §07.5</strong>——补齐 USB / Ethernet 两类物理链路接入所需的拓扑声明义务，并把「DID 如何生成、冲突如何处置」这两个此前只有属性、没有机制的身份空白填上；新增 <code>E_IDCONFLICT</code> 错误码，错误码总数由 12 个增至 13 个。<strong>v0.7 追加一章三节</strong>：<strong>§23 参考实现与 SDK 规格</strong>——把协议语义翻译成可编译的接口形态，给出三种注册语义（能力 / 设备类型 / 需求描述）、可获取的物理链路画像、设备侧单一执行入口、主机侧 CLI 契约与一份快速应用示例；配套 §05.16 / §06.11 / §07.6 补出 FR-074 ~ FR-078、NFR-052 ~ NFR-054、SEC-066 ~ SEC-067 共 10 条条目。<strong>v0.8 追加一章三节</strong>：<strong>§24 量、单位与工程数据交换规范</strong>——把「量」这一层从名字变成编码：冻结 24 项量种表（对齐 UCUM 的 Kind of Quantity）、63 项 UCUM 单位子集、数据类型与定点缩放、质量码；并纠正一处会被后人「优化」掉的错误——<strong>量纲向量不能作为换算判据</strong>，因为力与力矩的 SI 量纲完全一致。配套 §05.17 / §06.12 / §07.7 补出 FR-079 ~ FR-085、NFR-055、SEC-068 ~ SEC-069 共 10 条条目。<strong>v0.9 追加两节</strong>：<strong>§24.8 值类型协商</strong>与 <strong>§24.9 链路适配的三层边界</strong>——回答「MCU 与控制器、不同物理链路怎么用同一套语义」：新增 <code>accept_types</code> 与类型成本序，把「类型」定为 <code>(dtype, scale)</code> 二元组（定点的分辨率与有效范围绑死），并划清<strong>语义层跨链路恒定不可变、编码层与帧形态层可协商</strong>的界线；配套 §05.18 / §06.13 / §07.8 补出 FR-086 ~ FR-090、NFR-056、SEC-070 共 7 条条目。<strong>v0.10 追加一节三处</strong>：<strong>§23.9 一致性套件的双层产物</strong>——回答「套件从哪儿看」：把断言按可见性分成 L1 内部层（断言内部函数返回值，只对参考实现有意义）、<strong>L2 字节层</strong>（断言链路上真实出现过的帧字节，第三方实现可直接复用）、L3 行为层，并规定<strong>跨厂商互操作的合规判定 MUST 以 L2 / L3 为准</strong>；§11.3 增补断言可见性分层与认证矩阵的对应要求；配套 §05.19 / §06.14 / §07.9 补出 FR-091 ~ FR-094、NFR-057、SEC-071 共 6 条条目——这一批<strong>不引入任何协议机制</strong>，约束的是「怎么验」而非「协议怎么跑」，但它改变的是整个 M5 里程碑的验收含义：此前 M5 的通过条件是「参考实现自测全绿」，此后是「两个套件全绿，且字节层判据经得起独立性审查」。</p>
+  <p class="standfirst">一份范围界定 + 需求规格文档。核心结论是——「做到什么程度」不是功能清单问题，而是<strong>零配置接入</strong>问题：协议本体冻结哪几件事、生态互通的可验证判据是什么、哪些东西明确推迟。文中对即插即用六段管道、插件模型映射、信息漫游、接入状态机、保活三时钟、同步周期协商、自锁机制、权限与理解度的绑定关系、多模态映射、源竞争仲裁、ATE 格式与帧结构逐条给出可实现的定稿口径；并在此之上落成完整需求层——<strong>112 条功能需求、63 条非功能需求、79 条安全需求、三档一致性等级</strong>，每条需求均可追溯到设计决策、规范条款、协议帧与测试用例。<strong>v0.4 追加四章</strong>：权限模型完整设计、要不要建物模型的分层决策、协议定位与差异化论证，以及 66 行外部机制借鉴清单。<strong>v0.5 追加一章</strong>：<strong>§22 场景驱动推导</strong>——从十个未在文档中出现过的应用场景出发反推协议需求，把 60 项推导结论逐条判为「已被覆盖 / 需要改写 / 需要新增 / 明确排除」四类，并据此补出 FR-060 ~ FR-071、NFR-045 ~ NFR-051、SEC-057 ~ SEC-062 共 25 条新条目。<strong>v0.6 追加两节</strong>：<strong>§05.15 与 §07.5</strong>——补齐 USB / Ethernet 两类物理链路接入所需的拓扑声明义务，并把「DID 如何生成、冲突如何处置」这两个此前只有属性、没有机制的身份空白填上；新增 <code>E_IDCONFLICT</code> 错误码，错误码总数由 12 个增至 13 个。<strong>v0.7 追加一章三节</strong>：<strong>§23 参考实现与 SDK 规格</strong>——把协议语义翻译成可编译的接口形态，给出三种注册语义（能力 / 设备类型 / 需求描述）、可获取的物理链路画像、设备侧单一执行入口、主机侧 CLI 契约与一份快速应用示例；配套 §05.16 / §06.11 / §07.6 补出 FR-074 ~ FR-078、NFR-052 ~ NFR-054、SEC-066 ~ SEC-067 共 10 条条目。<strong>v0.8 追加一章三节</strong>：<strong>§24 量、单位与工程数据交换规范</strong>——把「量」这一层从名字变成编码：冻结 24 项量种表（对齐 UCUM 的 Kind of Quantity）、63 项 UCUM 单位子集、数据类型与定点缩放、质量码；并纠正一处会被后人「优化」掉的错误——<strong>量纲向量不能作为换算判据</strong>，因为力与力矩的 SI 量纲完全一致。配套 §05.17 / §06.12 / §07.7 补出 FR-079 ~ FR-085、NFR-055、SEC-068 ~ SEC-069 共 10 条条目。<strong>v0.9 追加两节</strong>：<strong>§24.8 值类型协商</strong>与 <strong>§24.9 链路适配的三层边界</strong>——回答「MCU 与控制器、不同物理链路怎么用同一套语义」：新增 <code>accept_types</code> 与类型成本序，把「类型」定为 <code>(dtype, scale)</code> 二元组（定点的分辨率与有效范围绑死），并划清<strong>语义层跨链路恒定不可变、编码层与帧形态层可协商</strong>的界线；配套 §05.18 / §06.13 / §07.8 补出 FR-086 ~ FR-090、NFR-056、SEC-070 共 7 条条目。<strong>v0.10 追加一节三处</strong>：<strong>§23.9 一致性套件的双层产物</strong>——回答「套件从哪儿看」：把断言按可见性分成 L1 内部层（断言内部函数返回值，只对参考实现有意义）、<strong>L2 字节层</strong>（断言链路上真实出现过的帧字节，第三方实现可直接复用）、L3 行为层，并规定<strong>跨厂商互操作的合规判定 MUST 以 L2 / L3 为准</strong>；§11.3 增补断言可见性分层与认证矩阵的对应要求；配套 §05.19 / §06.14 / §07.9 补出 FR-091 ~ FR-094、NFR-057、SEC-071 共 6 条条目——这一批<strong>不引入任何协议机制</strong>，约束的是「怎么验」而非「协议怎么跑」，但它改变的是整个 M5 里程碑的验收含义：此前 M5 的通过条件是「参考实现自测全绿」，此后是「两个套件全绿，且字节层判据经得起独立性审查」。</p>
   <p class="standfirst"><strong>v0.11 追加一章三处需求收口</strong>：新增 §25「全生命周期、消息结构与分布式组网」，把统一上线宣告、带抖动的有界退避、主动探测、沉睡唤醒、端到端转发、消息结构标识和分区写安全纳入同一生命周期；同步修正 DID、渐进披露、版本兼容、质量码、单位协商、失效保持与 BIND 恢复等相互冲突的旧口径。</p>
+  <p class="standfirst"><strong>v0.12 追加一章一节</strong>：新增 <strong>§26 单跳时延测绘与读数补偿</strong>——回答「时延测试与时间同步能不能内生」。结论是<strong>能，但只做单跳、只做补偿</strong>：复用既有 READ / READ 响应读取协议保留的时钟服务点 <code>0xFE00</code>，用发起端单侧时钟得到 RTT，用设备回传的本地计数反算偏移 θ；设备时钟<strong>零改动</strong>，补偿只发生在消费侧。明确不做多跳逐段测绘、不做节点自校准、不承诺绝对时间。配套 §05.21 / §06.16 / §07.11 补出 FR-107 ~ FR-112、NFR-061 ~ NFR-063、SEC-077 ~ SEC-079 共 9 条条目。</p>
   <div class="meta">
-    <span>文档版本 v0.11</span>
-    <span>日期 2026-11-02</span>
+    <span>文档版本 v0.12</span>
+    <span>日期 2026-11-06</span>
     <span>范围 L1–L4</span>
-    <span>章节 25 章</span>
-    <span>需求条目 242 条</span>
+    <span>章节 26 章</span>
+    <span>需求条目 254 条</span>
     <span>状态 待评审</span>
   </div>
 </header>
@@ -175,9 +176,9 @@ sup a{color:var(--accent);text-decoration:none;font-size:.75em;font-weight:700;}
 <li class="toc-req"><a href="#sec-02"><span class="tn">02</span><span class="tt">角色、场景与需求边界</span><span class="ts">角色 · 场景 · 边界</span></a></li>
 <li class="toc-design"><a href="#sec-03"><span class="tn">03</span><span class="tt">分层边界：v1 覆盖哪四层</span><span class="ts">分层与范围</span></a></li>
 <li class="toc-req"><a href="#sec-04"><span class="tn">04</span><span class="tt">需求总览与编号规则</span><span class="ts">分类 · 编号 · 追溯规则</span></a></li>
-<li class="toc-req"><a href="#sec-05"><span class="tn">05</span><span class="tt">功能需求清单</span><span class="ts">106 条功能需求</span></a></li>
-<li class="toc-req"><a href="#sec-06"><span class="tn">06</span><span class="tt">非功能需求</span><span class="ts">60 条非功能需求</span></a></li>
-<li class="toc-req"><a href="#sec-07"><span class="tn">07</span><span class="tt">安全需求</span><span class="ts">76 条安全需求</span></a></li>
+<li class="toc-req"><a href="#sec-05"><span class="tn">05</span><span class="tt">功能需求清单</span><span class="ts">112 条功能需求</span></a></li>
+<li class="toc-req"><a href="#sec-06"><span class="tn">06</span><span class="tt">非功能需求</span><span class="ts">63 条非功能需求</span></a></li>
+<li class="toc-req"><a href="#sec-07"><span class="tn">07</span><span class="tt">安全需求</span><span class="ts">79 条安全需求</span></a></li>
 <li class="toc-design"><a href="#sec-08"><span class="tn">08</span><span class="tt">十二个必须先定的设计决策</span><span class="ts">十二个设计决策</span></a></li>
 <li class="toc-design"><a href="#sec-09"><span class="tn">09</span><span class="tt">v1 规范骨架</span><span class="ts">v1 规范骨架</span></a></li>
 <li class="toc-design"><a href="#sec-10"><span class="tn">10</span><span class="tt">传输绑定：链路假设表与选型建议</span><span class="ts">传输绑定</span></a></li>
@@ -196,6 +197,7 @@ sup a{color:var(--accent);text-decoration:none;font-size:.75em;font-weight:700;}
 <li class="toc-design"><a href="#sec-23"><span class="tn">23</span><span class="tt">参考实现与 SDK 规格</span><span class="ts">注册 · 画像 · 入口 · 示例</span></a></li>
 <li class="toc-design"><a href="#sec-24"><span class="tn">24</span><span class="tt">量、单位与工程数据交换规范</span><span class="ts">量种 · UCUM · 类型 · 质量</span></a></li>
 <li class="toc-design"><a href="#sec-25"><span class="tn">25</span><span class="tt">全生命周期、消息结构与分布式组网</span><span class="ts">发现 · 休眠 · 结构 · 转发 · 恢复</span></a></li>
+<li class="toc-design"><a href="#sec-26"><span class="tn">26</span><span class="tt">单跳时延测绘与读数补偿</span><span class="ts">时钟服务点 · RTT · θ</span></a></li>
 </ol>
 </nav>
 
@@ -404,7 +406,7 @@ flowchart TB
 <tr><td><b>L1 身份寻址</b></td><td>唯一 ID 格式、分组模型、地址作用域</td><td>地址自动分配</td><td>跨组织 ID 联邦</td></tr>
 <tr><td><b>L2 帧编解码</b></td><td>帧头帧尾、类型、序列号、事务号、TLV 载荷、CRC</td><td>分片重组、压缩</td><td>自适应编码</td></tr>
 <tr><td><b>L3 能力语义</b></td><td>能力描述符 schema、规范量与单位、可转换性分级、权限等级、读写方向、同步周期上下限、需求描述</td><td>映射注册表扩展、多源融合策略</td><td>本体/知识图谱对齐</td></tr>
-<tr><td><b>L4 交互状态</b></td><td>请求响应、发布订阅、事件上报、心跳、租约仲裁、配对注册、<strong>能力匹配与参数协商、绑定契约</strong></td><td>流式多路复用、时间同步</td><td>分布式一致性</td></tr>
+<tr><td><b>L4 交互状态</b></td><td>请求响应、发布订阅、事件上报、心跳、租约仲裁、配对注册、<strong>能力匹配与参数协商、绑定契约</strong></td><td>流式多路复用、<strong>单跳时延测绘与读数补偿（§26，profile）</strong></td><td>分布式时钟同步、多跳逐段测绘、节点自校准</td></tr>
 <tr><td><b>L5 智能编排</b></td><td>仅定义「AI 如何调用」「PLC 如何订阅」的钩子契约</td><td>—</td><td>编排引擎本体</td></tr>
 </tbody>
 </table>
@@ -886,9 +888,25 @@ flowchart TB
 </table>
 </div>
 
+<h3><span class="num">05.21</span>单跳时延测绘与读数补偿条目（v0.12 追加）</h3>
+<p>本节把 §26 的「内生但不越界」落成可验收行为：时延测绘只做单跳，时间同步只做消费侧补偿。全部条目属于 <code>time-probe</code> 功能 profile；未声明该 profile 的实现不被要求实现，但 MUST 在能力声明中明示不支持。</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th style="width:8%">ID</th><th style="width:36%">需求描述</th><th style="width:9%">优先级</th><th style="width:33%">验收方法</th><th style="width:14%">归属章节</th></tr></thead>
+<tbody>
+<tr><td><code>FR-107</code></td><td>声明 <code>time-probe</code> profile 的实现 MUST 提供只读的协议保留服务点 <code>0xFE00</code>（时钟计数）；用户能力点 MUST NOT 占用 <code>0xFE00 ~ 0xFEFF</code>。该服务点 MUST NOT 参与 MATCH、MUST NOT 进入 <code>cap_list</code>；未声明 profile 的实现对该索引 MUST 返回 <code>E_NODEV</code>，不得返回伪造计数。</td><td><span class="tag tag-must">MUST</span></td><td>注册一个占用 0xFE00 的用户能力点必须被拒绝；对 0xFE00 发起 MATCH 不得被当成普通能力点；未声明 profile 的实现返回 E_NODEV 而非 0。</td><td>§26.1、§26.2</td></tr>
+<tr><td><code>FR-108</code></td><td>时钟响应 MUST 携带 <code>counter</code>、<code>tick_ns</code>、<code>epoch</code>、<code>quality</code> 四项；<code>tick_ns</code> MUST 由设备声明，协议 MUST NOT 默认 µs；<code>epoch</code> 在设备重启或计数初始化时 MUST 递增，跨 epoch 的计数 MUST NOT 参与任何差值或补偿。</td><td><span class="tag tag-must">MUST</span></td><td>用 1 ms 计数时基的设备接入，协议不得把它当成 1 µs；重启后 epoch 必须变化；用旧 epoch 样本做补偿必须被拒绝。</td><td>§26.2</td></tr>
+<tr><td><code>FR-109</code></td><td>单跳测量 MUST 复用既有 READ 与 READ 响应，MUST NOT 为此新增帧类型；RTT MUST 由发起端单侧时钟量得，不需要任何跨节点同步；请求与响应的 SRC/DST MUST 保持端到端身份，任何中间层 MUST NOT 改写。</td><td><span class="tag tag-must">MUST</span></td><td>逐帧检查线上只有既有 READ/响应；核对请求与响应的 SRC/DST；在转发路径上测量时端到端身份与契约一致。</td><td>§26.3、§26.4</td></tr>
+<tr><td><code>FR-110</code></td><td>偏移 MUST 按 <code>θ = counter × tick_ns − (t0 + RTT/2)</code> 计算，并 MUST 给出由 <code>tick_ns</code> 与发起端取样分辨率合成的测不准上界；实现 MUST NOT 把 θ 表述为绝对时间或墙钟。</td><td><span class="tag tag-must">MUST</span></td><td>用已知固定偏移的模拟时钟核对 θ；检查 API/文档不出现「当前时间」类措辞；不确定度必须覆盖实际误差。</td><td>§26.3</td></tr>
+<tr><td><code>FR-111</code></td><td>本 profile 的同步形态 MUST 仅是读数补偿：消费方用 θ 把设备计数映射回发起端轴，设备时钟 MUST NOT 被修改。映射前 MUST 校验 <code>epoch</code> 相同；补偿值 MUST NOT 用于租约 TTL、心跳超时、命令过期等本地定时判定。</td><td><span class="tag tag-must">MUST</span></td><td>测量前后核对设备端计数连续、无跳变；把补偿值喂给租约判定必须被架构评审拒绝；跨 epoch 映射必须返回错误或拒绝。</td><td>§26.5</td></tr>
+<tr><td><code>FR-112</code></td><td>本 profile MUST NOT 宣称支持多跳逐段测绘、节点自校准或全局时间同步；这些能力需要独立 profile 并在能力声明中明示。测量结果 MUST NOT 被当作存活、健康或 QoS 的替代判据。</td><td><span class="tag tag-must">MUST</span></td><td>审查能力声明不得出现未实现的同步档位；用测量失败直接判定离线必须被测试拒绝；多跳需求必须走独立 profile 评审。</td><td>§26.6</td></tr>
+</tbody>
+</table>
+</div>
+
 <div class="verdict">
 <h3>本章结论</h3>
-<p>功能需求层共 <strong>106 条</strong>条目，覆盖发现、描述、匹配、协商、授权、绑定、运行期交互、保活租约、仲裁、语义单位与错误诊断十一个能力域，外加六节补写条目（§05.14 场景推导 12 条、§05.15 传输拓扑与身份唯一性 2 条、§05.16 参考实现与 SDK 规格 5 条、§05.17 量与工程数据交换 7 条、§05.18 值类型协商与链路适配 5 条、§05.19 一致性套件可见性分层 4 条），全部带可操作的验收方法与归属章节。这批条目的共同约束不是「功能多」而是<strong>行为确定</strong>：每条 MUST 都规定了失败时会发生什么，因此第三方既知道该做什么，也知道做不到时对方会看到什么。<strong>§05.13 列出的 11 项未完全覆盖机制中，7 项已在 §05.14 落成条目</strong>（FR-060 ~ FR-069 中的 8 条与 FR-070 ~ FR-071 中的 2 条分别对应 11 行里的 7 行，其余 4 行维持「部分覆盖」或「由别处条目承接」）——需求边界的扩张应当走评审，而不是由实现者各自推定；本轮走的是 §12.4 登记过的补写流程。<strong>§05.15 的两条补上了最后一个与身份相关的缺口</strong>：在此之前，DID 只被规定了属性（8 字节、恒定、权限不入 ID），其生成方式与冲突处置是空白——FR-072 与 FR-073 把这两处空白填上，配合 §07.5 的 SEC-063 ~ SEC-065 与新增错误码 <code>E_IDCONFLICT</code>，形成「可生成 · 可检测 · 可消解」的闭环。<strong>§05.16 的五条则把「语义」翻译成「接口形态」</strong>：FR-074 把 X1 落成注册路径的结构性红线，FR-075 把六段管道落成单一执行入口，FR-076 把链路假设表落成可查询的链路画像，FR-077 把「命令行不得出现 DID」落成工具形态，FR-078 把「写是异步的」落成发起与裁决两条通道——此前它们只是设计文档里的句子，实现者无从判定自己的 API 是否合规。<strong>§05.17 的七条补上的是最后一处「有名字、无编码」的空白</strong>：FR-079 把单位码与量种落成受控编码（UCUM 子集 + 冻结量种表），FR-080 守住「表随规范发布、不查外部注册表」这条零中心依赖红线，FR-081 把匹配的第一道判据从字符串改为量种 ID，FR-082 明确<strong>量纲向量不得作为换算判据</strong>（力与力矩的量纲完全一致），FR-083 与 FR-084 让「帧内不传裸浮点数」第一次有了可执行的落地方式（数据类型 + 定点缩放），FR-085 让质量码进入值级并与 provenance 正交——此前「规范量」一词在 §08.8 说了十七个字，描述符里却连数据类型这一项都没有。<strong>§05.18 的五条补的是 v0.8 遗留的那处不对称</strong>：描述符有 <code>accept_units</code> 却没有 <code>accept_types</code>，于是 MCU 说「我的加速度是 f64」时控制器无法要求改用定点。FR-086 把接受类型落成 <code>(dtype, scale)</code> 二元组（定点的分辨率与有效范围绑死，只列类型会协商出装不下值域的结果），FR-087 规定「先过滤后取最小」的两步算法，FR-088 划清「语义跨链路恒定、编码与帧形态可变」的边界并禁止用换单位来压体积，FR-089 规定编译期裁剪不得重排量种 ID 且未实现的量种须回 <code>E_NODEV</code>，FR-090 把链路 MTU 对数据体积的约束纳入 NEGOTIATE 判定。<strong>§05.19 的四条补的是「怎么验」这一层</strong>：此前参考实现的自测几乎全部断言内部函数返回值，这能证明「参考实现符合参考实现」——而这恰恰是唯一不需要证明的那件事；第三方实现无法用它对照，因为断言里嵌着被测实现的内部结构。FR-091 把断言按可见性分成 L1 内部层 / L2 字节层 / L3 行为层三档并规定合规判定 MUST 以 L2 / L3 为准，FR-092 要求字节层断言的判据独立于被测实现重新实现（帧解析与 CRC 计算 MUST 重写而非复用），FR-093 规定字节层断言 MUST 按方向分别进行（SEQ 是每方向独立递增的，混流后断言必然失效），FR-094 要求两个产物分列且合规声明 MUST 同时给出两者的执行结果。这四条不引入任何协议机制，只约束验收本身的形态——但没有它们，M5 一致性套件证明不了任何跨厂商的东西。</p>
+<p>功能需求层共 <strong>112 条</strong>条目，覆盖发现、描述、匹配、协商、授权、绑定、运行期交互、保活租约、仲裁、语义单位、错误诊断与时延测绘十二个能力域，外加八节补写条目（§05.14 场景推导 12 条、§05.15 传输拓扑与身份唯一性 2 条、§05.16 参考实现与 SDK 规格 5 条、§05.17 量与工程数据交换 7 条、§05.18 值类型协商与链路适配 5 条、§05.19 一致性套件可见性分层 4 条、§05.20 全生命周期与分布式组网 12 条、§05.21 单跳时延测绘与读数补偿 6 条），全部带可操作的验收方法与归属章节。这批条目的共同约束不是「功能多」而是<strong>行为确定</strong>：每条 MUST 都规定了失败时会发生什么，因此第三方既知道该做什么，也知道做不到时对方会看到什么。<strong>§05.13 列出的 11 项未完全覆盖机制中，7 项已在 §05.14 落成条目</strong>（FR-060 ~ FR-069 中的 8 条与 FR-070 ~ FR-071 中的 2 条分别对应 11 行里的 7 行，其余 4 行维持「部分覆盖」或「由别处条目承接」）——需求边界的扩张应当走评审，而不是由实现者各自推定；本轮走的是 §12.4 登记过的补写流程。<strong>§05.15 的两条补上了最后一个与身份相关的缺口</strong>：在此之前，DID 只被规定了属性（8 字节、恒定、权限不入 ID），其生成方式与冲突处置是空白——FR-072 与 FR-073 把这两处空白填上，配合 §07.5 的 SEC-063 ~ SEC-065 与新增错误码 <code>E_IDCONFLICT</code>，形成「可生成 · 可检测 · 可消解」的闭环。<strong>§05.16 的五条则把「语义」翻译成「接口形态」</strong>：FR-074 把 X1 落成注册路径的结构性红线，FR-075 把六段管道落成单一执行入口，FR-076 把链路假设表落成可查询的链路画像，FR-077 把「命令行不得出现 DID」落成工具形态，FR-078 把「写是异步的」落成发起与裁决两条通道——此前它们只是设计文档里的句子，实现者无从判定自己的 API 是否合规。<strong>§05.17 的七条补上的是最后一处「有名字、无编码」的空白</strong>：FR-079 把单位码与量种落成受控编码（UCUM 子集 + 冻结量种表），FR-080 守住「表随规范发布、不查外部注册表」这条零中心依赖红线，FR-081 把匹配的第一道判据从字符串改为量种 ID，FR-082 明确<strong>量纲向量不得作为换算判据</strong>（力与力矩的量纲完全一致），FR-083 与 FR-084 让「帧内不传裸浮点数」第一次有了可执行的落地方式（数据类型 + 定点缩放），FR-085 让质量码进入值级并与 provenance 正交——此前「规范量」一词在 §08.8 说了十七个字，描述符里却连数据类型这一项都没有。<strong>§05.18 的五条补的是 v0.8 遗留的那处不对称</strong>：描述符有 <code>accept_units</code> 却没有 <code>accept_types</code>，于是 MCU 说「我的加速度是 f64」时控制器无法要求改用定点。FR-086 把接受类型落成 <code>(dtype, scale)</code> 二元组（定点的分辨率与有效范围绑死，只列类型会协商出装不下值域的结果），FR-087 规定「先过滤后取最小」的两步算法，FR-088 划清「语义跨链路恒定、编码与帧形态可变」的边界并禁止用换单位来压体积，FR-089 规定编译期裁剪不得重排量种 ID 且未实现的量种须回 <code>E_NODEV</code>，FR-090 把链路 MTU 对数据体积的约束纳入 NEGOTIATE 判定。<strong>§05.19 的四条补的是「怎么验」这一层</strong>：此前参考实现的自测几乎全部断言内部函数返回值，这能证明「参考实现符合参考实现」——而这恰恰是唯一不需要证明的那件事；第三方实现无法用它对照，因为断言里嵌着被测实现的内部结构。FR-091 把断言按可见性分成 L1 内部层 / L2 字节层 / L3 行为层三档并规定合规判定 MUST 以 L2 / L3 为准，FR-092 要求字节层断言的判据独立于被测实现重新实现（帧解析与 CRC 计算 MUST 重写而非复用），FR-093 规定字节层断言 MUST 按方向分别进行（SEQ 是每方向独立递增的，混流后断言必然失效），FR-094 要求两个产物分列且合规声明 MUST 同时给出两者的执行结果。这四条不引入任何协议机制，只约束验收本身的形态——但没有它们，M5 一致性套件证明不了任何跨厂商的东西。</p>
 </div>
 </section>
 <section>
@@ -1200,6 +1218,22 @@ flowchart TB
 <tr><td><code>NFR-060</code></td><td>多跳发现的重复抑制与转发资源上限（承接 FR-097、FR-101）</td><td>(originator_id, query_id) 缓存、转发队列、每节点跳数和 hop_limit MUST 有界；环路、重复和超窗报文 MUST 被去重或拒绝；具体容量按 TC-B/TC-C 标定</td><td>构造重复 PROBE、环路帧、超 hop 帧和缓存耗尽攻击；确认无状态线性增长、无广播环路、无二次业务副作用，并记录各基线实测容量</td><td><span class="tag tag-must">MUST</span></td></tr>
 </tbody>
 </table>
+</div>
+
+<h3><span class="num">06.16</span>单跳时延测绘的资源、精度与扰动条目（v0.12 追加）</h3>
+<p>本节把「可测量」与「可保证」分开：资源上限与必须报告的测不准是 MUST；具体精度数字在测试基线标定前是 SHOULD。不得用一条未标定的精度承诺替代测不准上界。</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th style="width:9%">ID</th><th style="width:19%">指标</th><th style="width:26%">目标值 / 分档</th><th style="width:32%">测量方法</th><th style="width:14%">优先级</th></tr></thead>
+<tbody>
+<tr><td><code>NFR-061</code></td><td>时钟服务与测量的资源上限（承接 FR-107 ~ FR-112）</td><td>不新增帧类型；一次测量只产生一帧 READ 与一帧 READ 响应，CLOCK 记录定长 15 B；MCU 侧代码目标 ≤ 2 KB Flash、每对端状态 ≤ 64 B RAM；MUST NOT 引入后台线程或周期定时器</td><td>统计测量前后的代码体积与 .bss；抓取线上帧并核对只有既有 READ/响应；在无测量调用时确认没有任何周期帧产生</td><td><span class="tag tag-opt">SHOULD</span> / <span class="tag tag-must">MUST</span></td></tr>
+<tr><td><code>NFR-062</code></td><td>单跳 RTT 与偏移的精度表达（承接 FR-110）</td><td>RTT 与 θ 的误差目标 ≤ max(tick_ns, 发起端取样分辨率)，路径对称时成立；Ethernet/USB 目标 ≤ 1 ms，UART/RS-485 目标 ≤ 5 ms；实现 MUST 报告 <code>uncertainty_ns</code>，且实际误差 MUST NOT 超过该上界；路径不对称时 MUST 标注为非保证</td><td>用已知固定偏移与已知单向延迟的模拟链路核对 θ 与 RTT；刻意注入非对称延迟，确认实现不会把 RTT/2 当成可靠单程时延；核对报告的 uncertainty 覆盖实测最大误差</td><td><span class="tag tag-opt">SHOULD</span> / <span class="tag tag-must">MUST</span></td></tr>
+<tr><td><code>NFR-063</code></td><td>测量流量对 RT 与周期数据面的扰动（承接 FR-112）</td><td>每对端测量频率目标 ≤ 1 次/秒，占用带宽目标 ≤ 链路的 1%；RT profile 下 MUST 让测量帧避让时隙，MUST NOT 因测量阻塞或推迟已排定的周期帧；测量突发 MUST 有抖动与上限</td><td>在 RT profile 下以 1 Hz 与突发两种模式运行测量，统计周期帧的抖动与丢帧；出现周期帧被测量挤出即失败；记录带宽占比与最坏排队时延</td><td><span class="tag tag-opt">SHOULD</span> / <span class="tag tag-must">MUST</span></td></tr>
+</tbody>
+</table>
+</div>
+<div class="note">
+<p><strong>精度不是承诺，是带条件的上界。</strong>RTT/2 只有在路径对称时才等于单程时延；异步链路、CSMA 重传和存储转发都会破坏这个前提。规范因此要求把测不准显式报告出来，而不是用一个「±1 ms」的数字掩盖它。<strong>测量也不得改变数据面的时序</strong>：它是诊断流量，不能因为要测时延反而制造时延。</p>
 </div>
 </section>
 <section>
@@ -1556,6 +1590,22 @@ flowchart TB
 <tr><td><code>SEC-076</code></td><td>分布式写必须 fail closed：执行器只接受本地已激活纪元、当前 token 且未过本地租约截止时间的写；新权威必须带经验证的 authority_epoch，新 owner 必须在执行器激活后写入。分区恢复与权威切换不得绕过旧 TTL；执行器重启必须直接失效旧租约，仅保留最高纪元下限并等待重新激活</td><td><span class="tag tag-must">MUST</span></td><td>构造双分区、双权威、权威失联、执行器重启和旧 owner 重连；任何绕过旧 TTL、无见证权威切换或旧 token 写均被 E_LEASE/E_PERM 拒绝且输出不变</td></tr>
 </tbody>
 </table>
+</div>
+
+<h3><span class="num">07.11</span>时延测绘与补偿的安全条目（v0.12 追加）</h3>
+<p>时延测绘把「时间」变成了一个可被影响的输入：谁能让设备相信一个错误的偏移，谁就能让依赖该偏移的上层做出错误判断。本节只覆盖单跳、只读补偿这一档的攻击面；多跳与节点自校准需要独立评审。</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th style="width:10%">ID</th><th style="width:42%">需求描述</th><th style="width:10%">强度</th><th style="width:38%">验收方法</th></tr></thead>
+<tbody>
+<tr><td><code>SEC-077</code></td><td>时钟服务点 <code>0xFE00</code> MUST 只对已绑定、已认证且权限 ≥ P1 的对端开放；未认证、未绑定或不存在的对端 MUST 得到不可区分的失败响应，MUST NOT 通过时延差暴露 DID 是否存在。测量 MUST 按对端限速，MUST NOT 形成放大或电池耗竭通道</td><td><span class="tag tag-must">MUST</span></td><td>分别对存在/不存在/未绑定 DID 发起测量，响应时延与错误结构必须不可区分；超限速率发送测量，服务端必须限流且不产生超额响应；未认证请求不得拿到 counter</td></tr>
+<tr><td><code>SEC-078</code></td><td>θ 与任何补偿参数 MUST 只来自本端发起的、txn 匹配且通过绑定/会话/授权纪元校验的测量响应；MUST NOT 接受未经请求的时钟值或旧 txn 的回包。跨 epoch 的样本 MUST 被拒绝；补偿值 MUST NOT 进入租约、心跳、过期等安全定时判定</td><td><span class="tag tag-must">MUST</span></td><td>注入未请求的 CLOCK 帧、重放旧 txn 回包、混合 epoch 样本，均必须被丢弃；把 θ 注入 TTL 判定必须被代码评审和测试双重拒绝；验证重放不会改变已有测量结果</td></tr>
+<tr><td><code>SEC-079</code></td><td>counter 与 epoch 可暴露设备启动时长和本地计数规律：MUST 只向已绑定对端披露，MUST NOT 在广播、未认证响应、日志或诊断输出中携带原始计数；MUST NOT 借测量响应披露拓扑、逐跳身份或绝对墙钟</td><td><span class="tag tag-must">MUST</span></td><td>抓取广播与未认证流量，不得出现 CLOCK 记录；检查日志与错误体不含原始 counter；确认响应不含任何路径/跳数/绝对时间字段</td></tr>
+</tbody>
+</table>
+</div>
+<div class="note">
+<p><strong>测量天然是一个时延侧信道。</strong>「存在但拒绝」与「不存在」的响应时间不同，就足以让攻击者枚举设备。SEC-077 要求这两种情况在外部观察下不可区分，这与 SEC-011 的「错误不得泄露存在性」是同一条线。另一点容易被忽略：<strong>θ 是控制输入而不是观测值</strong>——一旦上层用 θ 做排序、打戳或裁决，伪造 θ 就等于伪造时间，因此它的来源校验必须和写授权一样严格。</p>
 </div>
 </section>
 <section>
@@ -2040,6 +2090,9 @@ flowchart LR
 </table>
 </div>
 
+<h4>协议保留服务点（v0.12）</h4>
+<p><code>0xFE00 ~ 0xFEFF</code> 是协议保留区，用户能力点 <strong>MUST NOT</strong> 占用。保留点不是普通能力点：<strong>不参与 MATCH、不进入 <code>cap_list</code>、不出现在公共描述符</strong>，只对已绑定、已认证且权限足够的对端开放。当前只定义 <code>0xFE00</code> 时钟计数服务点（§26）；未声明 <code>time-probe</code> profile 的实现对它 MUST 返回 <code>E_NODEV</code>，不得返回伪造值。这样既让时延测绘复用既有 READ，又避免把服务点混进能力协商、把「有没有时钟服务」变成匹配失败的理由。</p>
+
 <h4>量种、单位与可转换性</h4>
 <p>这一组字段的完整编码见 §24。<strong>核心变化是「量」这一层从自由字符串变成了受控编码</strong>：<code>dim</code> 由字符串改为量种 ID，<code>unit</code> 由字符串改为 UCUM 规范码，并新增数据类型与定点缩放两项——后者正是 §08.8「规范量包含数据类型」此前无处安放的位置。</p>
 <div class="table-wrap">
@@ -2160,6 +2213,10 @@ flowchart LR
 
 <div class="note">
 <strong>关于 CMD / ACK / DONE 三段语义。</strong>早期设想里命令是一个请求-响应。但机器人场景下「受理」与「完成」的时间差可能长达数百毫秒（运动指令执行到位需要时间），如果合并成一次响应，上层只能靠超时猜测结果，且无法区分「命令没送到」与「命令送到了但执行失败」。拆成三段后：ACK 解决送达确认，DONE 解决执行结果，缺 DONE 时上层可按该点的 fail_action 自行降级。
+</div>
+
+<div class="note">
+<strong>v0.12：时延测绘不新增帧类型。</strong>时钟测量复用 <code>READ</code> 与 <code>READ</code> 响应，读的是协议保留服务点 <code>0xFE00</code>；响应里承载的是 15 字节 CLOCK 记录而不是 <code>VALUE</code>。这样不必往帧类型表里塞一个只服务诊断的 <code>MEASURE</code>，也不会让未实现 profile 的设备因为「未知类型」而失联。多跳逐段测绘若将来要做，才需要独立 profile 与独立帧类型（§26.6）。
 </div>
 
 <h3><span class="num">09.5</span>ATE 文本文法</h3>
@@ -2508,6 +2565,7 @@ ATE[1.0]{addr:dev:ID-00:11:22:33:44:55:66:77,
 
 <tr><td><b>一致性套件可见性分层</b><br/><span style="font-size:.86em;color:var(--muted)">v0.10 补写</span></td><td>FR-091 ~ FR-094</td><td>§11.3、§23.9</td><td>§11.3、§23.9</td><td>全部帧</td><td>CL-1 / CL-2</td><td>M1 最小集 / M5 完整矩阵</td></tr>
 <tr><td><b>全生命周期与分布式组网</b><br/><span style="font-size:.86em;color:var(--muted)">v0.11 补写</span></td><td>FR-095 ~ FR-106</td><td>§25.1 ~ §25.7</td><td>§09.1、§09.2、§09.4、§09.7、§25</td><td>DISCOVER、HELLO、NEGOTIATE、AUTH、BIND、LEASE、WRITE</td><td>CL-1 / CL-2 / 功能 profile</td><td>M1 / M2 / M3 / M6</td></tr>
+<tr><td><b>单跳时延测绘与读数补偿</b><br/><span style="font-size:.86em;color:var(--muted)">v0.12 补写</span></td><td>FR-107 ~ FR-112</td><td>§26.1 ~ §26.6</td><td>§09.2、§09.4、§26</td><td>READ（服务点 0xFE00）、ERROR</td><td>time-probe profile</td><td>M1 / M5</td></tr>
 </tbody>
 </table>
 </div>
@@ -2550,6 +2608,7 @@ ATE[1.0]{addr:dev:ID-00:11:22:33:44:55:66:77,
 
 <tr><td><b>一致性套件规模与开销</b><br/><span style="font-size:.86em;color:var(--muted)">v0.10 补写</span></td><td>NFR-057</td><td>§11.3</td><td>§23.9</td><td>全部帧</td><td>CL-1 / CL-2</td><td>M1 最小集 / M5 完整矩阵</td></tr>
 <tr><td><b>发现、休眠与转发资源</b><br/><span style="font-size:.86em;color:var(--muted)">v0.11 补写</span></td><td>NFR-058 ~ NFR-060</td><td>§25.3 ~ §25.6</td><td>§25</td><td>DISCOVER、HELLO、转发帧</td><td>睡眠 / 转发 profile</td><td>M2 / M3</td></tr>
+<tr><td><b>时钟服务资源与测量精度</b><br/><span style="font-size:.86em;color:var(--muted)">v0.12 补写</span></td><td>NFR-061 ~ NFR-063</td><td>§26.2 ~ §26.5</td><td>§06.16、§26</td><td>READ（服务点 0xFE00）</td><td>time-probe profile</td><td>M1 / M5</td></tr>
 </tbody>
 </table>
 </div>
@@ -2590,6 +2649,7 @@ ATE[1.0]{addr:dev:ID-00:11:22:33:44:55:66:77,
 
 <tr><td><b>一致性套件判据独立性</b><br/><span style="font-size:.86em;color:var(--muted)">v0.10 补写</span></td><td>SEC-071</td><td>§11.3</td><td>§11.3、§23.9</td><td>全部帧</td><td>CL-1 / CL-2</td><td>M1 最小集 / M5 完整矩阵</td></tr>
 <tr><td><b>唤醒、转发、结构及分区安全</b><br/><span style="font-size:.86em;color:var(--muted)">v0.11 补写</span></td><td>SEC-072 ~ SEC-076</td><td>§25.3 ~ §25.7</td><td>§09.1、§09.4、§25</td><td>DISCOVER、AUTH、BIND、WRITE、LEASE、PREEMPT</td><td>睡眠 / 转发 / 分布式写 profile</td><td>M1 / M2 / M3</td></tr>
+<tr><td><b>时延测绘与补偿安全</b><br/><span style="font-size:.86em;color:var(--muted)">v0.12 补写</span></td><td>SEC-077 ~ SEC-079</td><td>§07.11、§26.2、§26.5</td><td>§07.11、§26</td><td>READ（服务点 0xFE00）、ERROR</td><td>time-probe profile</td><td>M1 / M3 / M5</td></tr>
 </tbody>
 </table>
 </div>
@@ -2670,6 +2730,7 @@ ATE[1.0]{addr:dev:ID-00:11:22:33:44:55:66:77,
 <tr><td><b>§24.8 值类型协商 + §24.9 链路适配的三层边界</b><br/><span style="font-size:.86em;color:var(--muted)">v0.9 追加</span></td><td>适配章：回答「MCU 与控制器、不同物理链路怎么用同一套语义」——新增 <code>accept_types</code> 与类型成本序，划清语义层不可变、编码层与帧形态层可协商的界线</td><td>承接 §08.8 规范量定义、§09.2 描述符字段表、§09.7 契约逐点条目、§10 链路假设表、§06.4 资源预算、§24.7 帧内增量的既有覆盖关系</td><td><b>需要新增，已在本轮补齐。</b>落成 FR-086 ~ FR-090、NFR-056、SEC-070 共 7 条；新增描述符字段 <code>accept_types</code> 与契约逐点字段（协商出的 <code>dtype</code> + <code>scale</code>），不新增帧类型、不新增错误码、不新增管道阶段</td></tr>
 <tr><td><b>§23.9 一致性套件的双层产物</b><br/><span style="font-size:.86em;color:var(--muted)">v0.10 追加</span></td><td>验收章：回答「套件从哪儿看」——把断言按可见性分成 L1 内部层 / L2 字节层 / L3 行为层，并规定合规判定 MUST 以可移植的层为准</td><td>承接 §11.3 套件结构与认证矩阵、§15.7 待拍板项、§09.1 帧字段表、§08.12 CRC 覆盖范围、§23.8 构建与产物的既有覆盖关系</td><td><b>需要新增，已在本轮补齐。</b>落成 FR-091 ~ FR-094、NFR-057、SEC-071 共 6 条；<strong>不新增任何协议机制</strong>——本轮约束的是「怎么验」而不是「协议怎么跑」，因此不新增帧类型、不新增描述符字段、不新增错误码、不新增管道阶段</td></tr>
 <tr><td><b>§25 全生命周期、消息结构与分布式组网</b><br/><span style="font-size:.86em;color:var(--muted)">v0.11 追加</span></td><td>架构与规范章：统一标识语义，补齐发现/休眠/转发/结构/恢复/退出全周期，并修正旧需求冲突</td><td>承接 §08、§09、§10、§11、§24 的既有链路，新增 LEN、AUTH_TAG、schema、wake_profile、grant_epoch/fencing 等明确承接字段</td><td><b>需要新增，已在本轮补齐。</b>FR-095 ~ FR-106、NFR-058 ~ NFR-060、SEC-072 ~ SEC-076 共 20 条；同步更新 §05.20、§06.15、§07.10、§12.1/12.2 与 §14</td></tr>
+<tr><td><b>§26 单跳时延测绘与读数补偿</b><br/><span style="font-size:.86em;color:var(--muted)">v0.12 追加</span></td><td>能力章：把「时延测试与时间同步」收进协议，但只收单跳、只收消费侧补偿；设备时钟零改动</td><td>承接 §09.2 能力点索引、§09.4 READ 帧、§09.1 帧头 TS、§08.4 保活三时钟、§11.3 字节层断言、§23.9 黑盒套件的既有覆盖关系</td><td><b>需要新增，已在本轮补齐。</b>FR-107 ~ FR-112、NFR-061 ~ NFR-063、SEC-077 ~ SEC-079 共 9 条；新增协议保留服务点 <code>0xFE00 ~ 0xFEFF</code> 与 CLOCK 记录，<strong>不新增帧类型、不新增管道阶段、不新增错误码</strong></td></tr>
 </tbody>
 </table>
 </div>
@@ -2705,6 +2766,7 @@ ATE[1.0]{addr:dev:ID-00:11:22:33:44:55:66:77,
 <tr><td><b>参考实现不覆盖的部分</b><br/><span style="font-size:.86em;color:var(--muted)">v0.7 追加</span></td><td>§23 的参考实现是<strong>一致性套件的可执行形态，不是协议的完整实现</strong>。它覆盖 L1–L4 的主干：帧编解码、寻址、描述符、六段管道、协商、授权、绑定、周期发布、租约与仲裁、单位换算、错误体；但<strong>不覆盖</strong>：跨组织信息漫游 A 型（FR-060 / FR-061）、云端注册表与配置下发、ATE 文本配置轨的解析器、跨介质分片重组的完整实现、以及任何一种真实无线协议栈（BLE / Wi-Fi / LoRa）的适配器——它只提供 UART 与内存回环两种绑定。这些缺口不是遗漏，而是<strong>一致性套件的可执行性要求</strong>：套件 MUST 能在无人值守环境中跑完，因此 MUST NOT 依赖外部服务。第三方实现方 MUST NOT 把参考实现当作「完整实现」来对照进度</td></tr>
 <tr><td><b>全量 UCUM 与量种注册表</b><br/><span style="font-size:.86em;color:var(--muted)">v0.8 追加</span></td><td>§24 只冻结 <strong>24 项量种 + 63 项 UCUM 单位</strong>的核心子集，<strong>不实现全量 UCUM</strong>（约 2 500 码，需 ≈ 83 KB，是 NFR-024 的 48 KB MCU 预算的 173 %，且未含协议栈代码）。同样<strong>不提供量种或单位的运行期注册、查询与扩展机制</strong>——这类机制本质上是中心注册表，与 X1「接入链路零中心依赖」直接冲突。扩展的唯一途径是厂商私有单位前缀 <code>x:&lt;vendor&gt;:&lt;name&gt;</code>，且私有码不参与自动换算与量种匹配（FR-079、FR-080、SEC-068）</td></tr>
 <tr><td><b>按链路改变语义</b><br/><span style="font-size:.86em;color:var(--muted)">v0.9 追加</span></td><td>量种、单位、值域、坐标系<strong>跨链路恒定</strong>，链路差异只体现在值编码、帧形态与帧容量三层（FR-088、SEC-070）。这条看似是「不做什么」，但它是<strong>必须显式写死的禁止项</strong>：若允许按链路改语义，则同一台设备在 UART 与 Ethernet 上语义不同，D5「跨介质语义一致」与 §19.3 的 X1 同时失效，且接收侧会拿到不同的物理量——后者在机器人上的后果是执行器位置系统性偏移</td></tr>
+<tr><td><b>分布式时钟同步与多跳逐段测绘</b><br/><span style="font-size:.86em;color:var(--muted)">v0.12 追加</span></td><td>v0.12 只做<strong>单跳 RTT + 读数补偿</strong>（§26，<code>time-probe</code> profile）：不提供全局时间轴、不做多跳逐段测绘、不允许节点自校准、不承诺绝对墙钟。原因有三：一是 ID-CELL 的 SRC/DST 是端到端身份，逐跳接力需要另一套转发 profile 与逐跳审计；二是设备侧步进时钟会打乱租约 TTL、心跳与过期判定，必须引入双计数域才安全，而 v1 不引入；三是「同步」与「测量」的有效性都依赖路径对称，协议只能保证「报告测不准」，不能保证「测得准」。需要这些能力的场景 MUST 走独立 profile 评审，不得借 <code>time-probe</code> 名义实现（FR-112、SEC-078）</td></tr>
 </tbody>
 </table>
 </div>
@@ -2749,7 +2811,7 @@ gantt
 </div>
 
 <div class="note">
-<strong>里程碑与 v0.4 新增四章的关系。</strong>§18 把 §08.9 的权限三轴从原则写成了可实现的状态机与判定顺序，因此 <strong>M1 的出口判据「越权可诊断」现在有了明确的机制出处</strong>（授权纪元 <code>grant_epoch</code>、六态权限生命周期、三种终止语义）；§19 明确「物模型不是接入前提」，因此<strong>物模型不作为 M6 零配置验证的前置条件</strong>——它只影响生态工具链的可选能力；§20 与 §21 不改变任何里程碑出口，但它们是 M5 一致性测试套件的选题来源：§21.3 的五条优先吸收机制里有三条（QoS 偏序判定、区间相交判定、描述符分页）直接改写 §11 的档位判定方式，属于 M5 的工作项而非 M6。<br/><strong>§22 的补写条目落在既有里程碑上，不新增节点</strong>：FR-062（帧结构细则）落在 M0 / M1 的编解码出口；FR-060 / FR-063 / FR-065 与 FR-066 ~ FR-069 落在 M1（描述符与配置轨）；FR-070 / FR-071 与 SEC-057 ~ SEC-062 落在 M2（多设备与仲裁）；NFR-045 ~ NFR-051 与 §22 的 A / B 类补写是 M6（零配置验证）与 M5（一致性套件）的验收用例来源。<br/><strong>v0.6 的补写条目同样落在既有里程碑上，不新增节点</strong>：FR-072（DID 生成）与 FR-073（身份冲突检测）落在 M0 / M1 的身份与编解码出口；SEC-063（拓扑与主机代发声明）落在 M1；SEC-064（链路层标识不得作身份）与 SEC-065（冲突不得静默消解）落在 M1 的安全出口；新增的 T7 档与 TC-D 配置落在 M3 的跨介质矩阵，且 M3 的介质清单由四种扩到六种。<br/><strong>v0.7 的补写条目落在既有里程碑上，同样不新增节点</strong>：FR-075（单一执行入口）与 FR-076（链路画像可查询）落在 M1——它们是实现形态的起点，早于任何设备接入；FR-074（三条独立注册路径）落在 M1 的描述符出口，因为它约束的是描述符如何被生成；FR-077（主机侧按可读名选设备）与 FR-078（写的异步语义）落在 M6，与零配置验证同批验收；NFR-052 ~ NFR-054（构建可复现、自测以退出码表达、容量可裁剪）落在 M5 的套件出口；SEC-066（未声明画像按最坏链路假设）与 SEC-067（工具输出不得泄露凭证）落在 M1 的安全出口。<strong>参考实现本身不是里程碑交付物，而是 M5 一致性套件的可执行形态</strong>——它提前落地是为了让套件有可对照的黄金参考（§23.7），而非增加一个开发节点。<br/><strong>v0.8 的补写条目落在既有里程碑上，同样不新增节点</strong>：FR-079 / FR-080（量种与 UCUM 码、量种表冻结）落在 M1——描述符的字段语义必须在任何设备接入前定稿，否则兼容期无谓拉长；FR-081 / FR-082（量种优先判定、量纲向量不得作判据）落在 M6，与零配置验证同批验收；FR-083 / FR-084（数据类型与定点缩放）落在 M1 的描述符出口与 M3 的跨介质矩阵；FR-085（质量码）落在 M1 的数据面出口；NFR-055（量种表 Flash 占用与描述符增量）落在 M1 与 M5；SEC-068（私有码不得冒充标准码）与 SEC-069（质量码不得缺省良好）落在 M1 的安全出口。<strong>唯一需要额外说明的是 M6</strong>：§24.6 的判定链把 MATCH 的第一道判据从「单位字符串比较」换成「量种 ID 比较」，这会改变零配置验证的判定式，因此 FR-081 必须与 M6 同批验收——<strong>不能让旧判定式与新判定式在一段时间内并存</strong>，那会让「匹配成功」在两台设备上有两种含义。<br/><strong>v0.9 的补写条目落在既有里程碑上，同样不新增节点</strong>：FR-086 / FR-087（<code>accept_types</code> 与类型协商算法）落在 M6——它们是 NEGOTIATE 段的一部分，与零配置验证同批验收；FR-088（语义跨链路恒定）与 SEC-070 落在 M1 的描述符出口与 M3 的跨介质矩阵（后者要验证同一设备在不同链路档位下语义一致）；FR-089（编译期裁剪与未实现量种处置）落在 M1 与 M5；FR-090（链路 MTU 对数据体积的约束）落在 M3；NFR-056（协商开销与裁剪配置覆盖）落在 M5。</div>
+<strong>里程碑与 v0.4 新增四章的关系。</strong>§18 把 §08.9 的权限三轴从原则写成了可实现的状态机与判定顺序，因此 <strong>M1 的出口判据「越权可诊断」现在有了明确的机制出处</strong>（授权纪元 <code>grant_epoch</code>、六态权限生命周期、三种终止语义）；§19 明确「物模型不是接入前提」，因此<strong>物模型不作为 M6 零配置验证的前置条件</strong>——它只影响生态工具链的可选能力；§20 与 §21 不改变任何里程碑出口，但它们是 M5 一致性测试套件的选题来源：§21.3 的五条优先吸收机制里有三条（QoS 偏序判定、区间相交判定、描述符分页）直接改写 §11 的档位判定方式，属于 M5 的工作项而非 M6。<br/><strong>§22 的补写条目落在既有里程碑上，不新增节点</strong>：FR-062（帧结构细则）落在 M0 / M1 的编解码出口；FR-060 / FR-063 / FR-065 与 FR-066 ~ FR-069 落在 M1（描述符与配置轨）；FR-070 / FR-071 与 SEC-057 ~ SEC-062 落在 M2（多设备与仲裁）；NFR-045 ~ NFR-051 与 §22 的 A / B 类补写是 M6（零配置验证）与 M5（一致性套件）的验收用例来源。<br/><strong>v0.6 的补写条目同样落在既有里程碑上，不新增节点</strong>：FR-072（DID 生成）与 FR-073（身份冲突检测）落在 M0 / M1 的身份与编解码出口；SEC-063（拓扑与主机代发声明）落在 M1；SEC-064（链路层标识不得作身份）与 SEC-065（冲突不得静默消解）落在 M1 的安全出口；新增的 T7 档与 TC-D 配置落在 M3 的跨介质矩阵，且 M3 的介质清单由四种扩到六种。<br/><strong>v0.7 的补写条目落在既有里程碑上，同样不新增节点</strong>：FR-075（单一执行入口）与 FR-076（链路画像可查询）落在 M1——它们是实现形态的起点，早于任何设备接入；FR-074（三条独立注册路径）落在 M1 的描述符出口，因为它约束的是描述符如何被生成；FR-077（主机侧按可读名选设备）与 FR-078（写的异步语义）落在 M6，与零配置验证同批验收；NFR-052 ~ NFR-054（构建可复现、自测以退出码表达、容量可裁剪）落在 M5 的套件出口；SEC-066（未声明画像按最坏链路假设）与 SEC-067（工具输出不得泄露凭证）落在 M1 的安全出口。<strong>参考实现本身不是里程碑交付物，而是 M5 一致性套件的可执行形态</strong>——它提前落地是为了让套件有可对照的黄金参考（§23.7），而非增加一个开发节点。<br/><strong>v0.8 的补写条目落在既有里程碑上，同样不新增节点</strong>：FR-079 / FR-080（量种与 UCUM 码、量种表冻结）落在 M1——描述符的字段语义必须在任何设备接入前定稿，否则兼容期无谓拉长；FR-081 / FR-082（量种优先判定、量纲向量不得作判据）落在 M6，与零配置验证同批验收；FR-083 / FR-084（数据类型与定点缩放）落在 M1 的描述符出口与 M3 的跨介质矩阵；FR-085（质量码）落在 M1 的数据面出口；NFR-055（量种表 Flash 占用与描述符增量）落在 M1 与 M5；SEC-068（私有码不得冒充标准码）与 SEC-069（质量码不得缺省良好）落在 M1 的安全出口。<strong>唯一需要额外说明的是 M6</strong>：§24.6 的判定链把 MATCH 的第一道判据从「单位字符串比较」换成「量种 ID 比较」，这会改变零配置验证的判定式，因此 FR-081 必须与 M6 同批验收——<strong>不能让旧判定式与新判定式在一段时间内并存</strong>，那会让「匹配成功」在两台设备上有两种含义。<br/><strong>v0.9 的补写条目落在既有里程碑上，同样不新增节点</strong>：FR-086 / FR-087（<code>accept_types</code> 与类型协商算法）落在 M6——它们是 NEGOTIATE 段的一部分，与零配置验证同批验收；FR-088（语义跨链路恒定）与 SEC-070 落在 M1 的描述符出口与 M3 的跨介质矩阵（后者要验证同一设备在不同链路档位下语义一致）；FR-089（编译期裁剪与未实现量种处置）落在 M1 与 M5；FR-090（链路 MTU 对数据体积的约束）落在 M3；NFR-056（协商开销与裁剪配置覆盖）落在 M5。<br/><strong>v0.12 的补写条目同样落在既有里程碑上，不新增节点</strong>：FR-107 ~ FR-112（保留服务点、计数域声明、单跳 RTT、θ 与读数补偿、范围边界）落在 M1 与 M5——服务点与测量语义必须在任何设备接入前定稿，L2 字节层断言与独立向量在 M5 公开套件中验收；NFR-061 ~ NFR-063（资源上限、精度表达、RT 扰动）落在 M5 的性能矩阵；SEC-077 ~ SEC-079（认证与限速、补偿输入校验、计数披露）落在 M1 的安全出口与 M5 的模糊矩阵。<strong>时延测绘不是 M6 的前置条件</strong>：它不参与 MATCH/BIND，也不改变零配置判定式；未声明 <code>time-probe</code> 的设备照常接入。</div>
 </section>
 <section>
 <h2 id="sec-15"><span class="num">15</span>默认假设与待决问题</h2>
@@ -2850,9 +2912,9 @@ gantt
 </table>
 </div>
 
-<h3><span class="num">15.7</span>v0.7 参考实现引入的两项决策记录</h3>
+<h3><span class="num">15.7</span>参考实现与实现边界引入的决策记录</h3>
 
-<p>把协议写成代码的过程暴露了两个此前在纸面上不成立的问题：一是<strong>「单一执行入口」的抽象层次该定在哪一层</strong>，二是<strong>参考实现与一致性套件的关系该是「同一份代码」还是「两份独立实现」</strong>。两者都不改变已冻结的协议语义，但都会影响 M5 一致性套件的可信度。</p>
+<p>把协议写成代码的过程暴露了三个此前在纸面上不成立的问题：一是<strong>「单一执行入口」的抽象层次该定在哪一层</strong>，二是<strong>参考实现与一致性套件的关系该是「同一份代码」还是「两份独立实现」</strong>，三是<strong>时延测试与时间同步能不能内生、内生的边界在哪</strong>。三者都不改变已冻结的协议语义，但都会影响 M5 一致性套件的可信度。</p>
 
 <div class="table-wrap">
 <table>
@@ -2860,13 +2922,14 @@ gantt
 <tbody>
 <tr><td><b>执行入口的抽象层次</b></td><td><strong>一个函数承担全部协议行为。</strong>FR-075 规定 <code>idcell_node_poll(node, now_ms)</code> 一次调用内完成收帧、管道推进、周期发布、心跳与租约到期；应用层只提供时钟与回调</td><td>这一层定得太低，嵌入式实现会因单次调用耗时过长而无法塞进实时任务；定得太高，则「应用层不实现状态机」这条红线失效。参考实现当前按最坏链路假设配超时（SEC-066），因此单次调用时长与链路档位耦合</td><td>若要分层，须给出明确的分层契约（哪一层可以阻塞、哪一层必须非阻塞）并写入 §23.5；同时 FR-075 的验收方法需增加「按链路档位实测单次调用耗时上界」一条</td></tr>
 <tr><td><b>参考实现与一致性套件是否同一份代码</b></td><td><strong>v0.10 收口：同一份代码，两个产物，但断言 MUST 分层。</strong>参考实现既是 §11.3 套件的<strong>可执行形态</strong>，也是 §23.7 的<strong>黄金参考</strong>；NFR-053 要求套件以退出码表达结论。<strong>但断言 MUST 按可见性分层</strong>：内部层（断言内部函数返回值）作为参考实现的开发期回归保留，字节层（断言线上字节）作为跨厂商互操作的判据（FR-091）。字节层产物 MUST 只依赖公开接口头，MUST NOT 依赖内部头（FR-092、FR-094）</td><td>此前的问题是「套件与被测对象共用同一套内部逻辑」，因而只能验证「参考实现符合参考实现」。争议不在于要不要保留内部断言——它便宜、精确、能在毫秒内指出一行坏代码——而在于<strong>它能不能充当互操作判据</strong>。答案是不能：断言里嵌着被测实现的内部结构，第三方实现对不上这套结构，断言在编译期就失去意义</td><td><strong>本轮已完成</strong>：落成 FR-091 ~ FR-094、NFR-057、SEC-071 六条，参考实现新增 <code>tests/idcell_wire_probe.h</code> 与 <code>tests/selftest_wire.c</code> 两个产物（175 项 + 42 项）。字节层判据独立于参考实现重写（自带 CRC 与帧解析器），并按方向分别断言（SEQ 每方向独立递增）。<strong>若改为完全两份独立实现</strong>，套件须改为「黑盒对拍」形态（跑在链路上、抓字节流断言），工作量显著上升但可信度更高——本轮的字节层产物已经拿到了这项收益的大部分，而不必付出两份实现的代价</td></tr>
+<tr><td><b>时延测绘与时间同步的边界</b><br/><span style="font-size:.86em;color:var(--muted)">v0.12 追加</span></td><td><strong>本轮收口：单跳、只读补偿。</strong>复用既有 READ 读协议保留服务点 <code>0xFE00</code>，RTT 由发起端单侧时钟量得，偏移 θ 由设备回传计数反算；<strong>设备时钟零改动</strong>，补偿只发生在消费侧（FR-107 ~ FR-112）。不新增帧类型、不新增管道阶段、不新增错误码</td><td>交底书的方法本身是<strong>多跳、逐跳接力、可含节点自校准</strong>的。它不能原样进入 ID-CELL 的原因有三：SRC/DST 是端到端身份，逐跳改写会破坏 §25.1；设备侧步进时钟会打乱租约 TTL/心跳/过期，必须双计数域；O(k²) 的反向接力会带来权限、审计与放大问题。<strong>更重要的是，不能让「时延测量」变成「宣称有全局时钟」的入口</strong>——那会与 §20 的定位自相矛盾</td><td><strong>本轮已完成</strong>：落成 §26 与 9 条条目，参考实现新增 0xFE00 服务点、<code>idcell_node_measure_clock</code> / <code>idcell_clock_map_ns</code> 与第 13 组自测，黑盒套件新增 12.7。若将来要做多跳逐段测绘或节点自校准，MUST 另立独立 profile（含逐跳审计、双计数域与 epoch 规则），不得在 <code>time-probe</code> 名下扩展；§13 已把这条写进明确排除项</td></tr>
 </tbody>
 </table>
 </div>
 
 <div class="verdict">
 <h3>本章结论</h3>
-<p><strong>v0.11 已把上述事项分别收口为当前决策、适用 profile 或明确排除项。</strong>发布前仍需复审其线上字段和独立测试证据，但不再允许同一条目同时处于 MUST 与未决状态。§25 是新增生命周期、结构和分布式决策的现行基准。</p>
+<p><strong>v0.11 已把上述事项分别收口为当前决策、适用 profile 或明确排除项。</strong>发布前仍需复审其线上字段和独立测试证据，但不再允许同一条目同时处于 MUST 与未决状态。§25 是新增生命周期、结构和分布式决策的现行基准。<strong>v0.12 又收口一项：时延测绘与时间同步不再以「范围外」一句话带过，而是给出可执行的边界——单跳、只读补偿、设备钟零改动（§26）；多跳、自校准与全局时钟仍明确排除（§13）。</strong>这不是把 v1 的边界放宽，而是把「不做什么」写得更精确：能测单跳时延，不等于有分布式时钟；能补偿读数，不等于能改写时间。</p>
 <details><summary>v0.10 及更早版本的历史取舍记录</summary>
 <p>共 <strong>7 项默认假设 + 3 项待拍板 + 5 项需求层取舍点 + 3 项借鉴引入的待拍板项（其中 1 项已在 v0.8 收口）+ 2 项场景推导引入的待拍板项 + 2 项 v0.6 补写引入的待拍板项 + 2 项 v0.7 补写引入的待拍板项（其中 1 项已在 v0.10 收口）</strong>。这些不影响文档当前可评审性——每一项都有明确的默认取值，可以据此实现与互测。但它们<strong>都是协议发布前必须收口的</strong>：默认假设一旦进入实现代码就会变成事实，收口成本随时间指数上升。当前的默认取值是「可实现且可互测」的，不是「最优」的。其中三项借鉴引入的待拍板项里，<strong>UCUM 那一条优先级最高</strong>——它触及 §01 冻结的能力描述符，越晚决策，兼容期越长。<strong>这条已在 v0.8 收口</strong>：采纳路径 A（保留子集、单位取值改用 UCUM 码），路径 B（全量 UCUM，≈ 83 KB，出局于 48 KB MCU 预算），并追加冻结量种表——因为实测发现力与力矩的 SI 量纲完全一致，只统一单位码仍会允许 N 与 N.m 互相换算，这一条是本次收口中最重要的技术发现（详见 §24.2、FR-082）。v0.6 补入的两项待拍板项优先级低于前者：它们影响的是实现成本分布与厂商选型，不改变已冻结的协议语义。<strong>v0.7 补入的两项同样不触及冻结物</strong>，但其中「套件与参考实现是否同一份代码」这一项优先级高于 v0.6 的两项——它决定的是 M5 一致性套件究竟能证明什么，越晚决定，M5 的返工范围越大。<strong>这条已在 v0.10 收口</strong>：结论不是「分成两份独立实现」，而是「同一份代码、两个产物、断言分层」——内部层断言作为开发期回归保留，字节层断言作为跨厂商互操作判据，两者都由构建脚本产出、退出码语义一致、合规声明 MUST 同时给出（FR-091 ~ FR-094、NFR-057、SEC-071）。收口的技术判据只有一条：<strong>字节层的判据必须独立于被测实现</strong>——一旦判据来自被测实现自己的编解码函数，编码器与解码器就会共享同一个错误假设，断言全过而线上字节对第三方全是错的。这条判据落成 FR-092 与 SEC-071，是本轮全部六条新条目的共同源头。</p>
 </details>
@@ -3005,6 +3068,9 @@ gantt
 <tr><td><b>断言可见性分层</b></td><td>Assertion Visibility Layers</td><td>一致性断言按观察点分成三层：<strong>L1 内部层</strong>（断言实现的内部函数返回值与内部状态，只证明自洽，第三方无法复用）、<strong>L2 字节层</strong>（断言链路上真实出现过的帧字节，证明符合规范，第三方可直接复用）、<strong>L3 行为层</strong>（断言端到端可观察行为，证明对外行为一致）。跨厂商互操作的合规判定 MUST 以 L2 / L3 为准（FR-091、§11.3）</td></tr>
 <tr><td><b>线缆探针</b></td><td>Wire Probe</td><td>挂在传输层上的一层透明包装：在转发字节的同时把副本记进双向环形缓冲，供字节层断言取用。它对协议栈完全不可见——被测对象不知道自己在被观测，这是黑盒断言的前提。探针<strong>MUST</strong> 按方向分别记录（帧序每方向独立递增，混流后断言必然失效）</td></tr>
 <tr><td><b>判据独立性</b></td><td>Criterion Independence</td><td>字节层断言的判据（帧解析器、CRC 计算器、期望值）MUST 独立于被测实现重新实现，MUST NOT 来自被测实现自身的编解码结果。否则编码器与解码器会共享同一个错误假设——断言全过而线上字节对第三方全是错的。参考实现以 <code>tests/idcell_wire_probe.h</code> 独立重写 CRC-16 与帧解析器来兑现这一条（FR-092、SEC-071）</td></tr>
+<tr><td><b>时延测绘</b></td><td>Latency Probing</td><td>用一次往返（READ → READ 响应）在<strong>发起端单侧时钟</strong>上量得 RTT，并由对端回传的本地计数反算偏移 θ。它<strong>不是</strong>时间同步：不建立全局时间轴、不改写任何一端的时钟，只产出「这一段链路有多慢、时钟差多少」两个可验证的量（§26.3）</td></tr>
+<tr><td><b>读数补偿</b></td><td>Read-side Compensation</td><td>消费方在<strong>本地</strong>用 θ 把一个设备计数换算到发起端轴，原始计数与设备时钟均保持不变。它与「节点自校准」相反：不写设备、不跳变、不影响 TTL/心跳/过期；跨 <code>epoch</code> 不可比较（§26.5、FR-111）</td></tr>
+<tr><td><b>计数域</b></td><td>Counter Epoch</td><td>一段连续的本地单调计数，由 <code>epoch</code> 标识。设备重启或计数初始化 MUST 产生新 epoch；<strong>跨 epoch 的计数差值没有意义</strong>。协议因此不把设备计数当作绝对时间，只把它当作「同一 epoch 内的相对刻度」（FR-108）</td></tr>
 </tbody>
 </table>
 </div>
@@ -3767,7 +3833,7 @@ flowchart TB
 
 <h3><span class="num">20.1</span>六个协议的抽象、强项与硬伤</h3>
 
-<p>先看最常被拿来对比的六个。它们不是竞品，而是<strong>各自问题域里的最优解</strong>——Modbus 的寄存器模型、EtherCAT 的分布式时钟、MQTT 的 Broker 拓扑、CoAP 的资源动词模型，在各自的问题域里都不可替代。批评它们「没有语义」，就像批评 ID-CELL「没有分布式时钟」：那是不同赛道上不同的问题。</p>
+<p>先看最常被拿来对比的六个。它们不是竞品，而是<strong>各自问题域里的最优解</strong>——Modbus 的寄存器模型、EtherCAT 的分布式时钟、MQTT 的 Broker 拓扑、CoAP 的资源动词模型，在各自的问题域里都不可替代。批评它们「没有语义」，就像要求 ID-CELL 提供 EtherCAT 那样的全局时间轴：那是不同赛道上的不同问题。<strong>ID-CELL 不提供分布式时钟，但提供单跳时延测绘与读数补偿（§26）</strong>——前者是「全网同一时刻」，后者是「这一段链路多快、两个计数差多少」，两者在问题域上不可互相替代。把后者说成前者，既是过度承诺，也会让上层误以为可以拿它做跨分区裁决。</p>
 
 <div class="table-wrap">
 <table>
@@ -4881,9 +4947,9 @@ flowchart TB
   subgraph OUT["交付物 · 非协议层"]
     F1["examples/quickstart.c · 386 行<br/>黄金参考"]
     F2["tools/idcell_cli.c · 727 行<br/>主机侧 CLI"]
-    F3["tests/selftest.c · 1504 行<br/>12 组 221 项自测（L1 内部层）"]
-    F4["tests/selftest_wire.c · 685 行<br/>6 组 43 项自测（L2 字节层）"]
-    G1["tests/idcell_wire_probe.h · 569 行<br/>独立线缆探针 · 独立帧解析器"]
+    F3["tests/selftest.c · 1674 行<br/>13 组 235 项自测（L1 内部层）"]
+    F4["tests/selftest_wire.c · 830 行<br/>7 组 67 项自测（L2 字节层）"]
+    G1["tests/idcell_wire_probe.h · 568 行<br/>独立线缆探针 · 独立帧解析器"]
   end
   A1 --> B1
   A2 --> E1
@@ -4920,8 +4986,8 @@ flowchart TB
 <tr><td><code>src/idcell_transport.c</code></td><td>307</td><td>内存回环与串口适配器实现</td><td>§10</td></tr>
 <tr><td><code>examples/quickstart.c</code></td><td>386</td><td>快速应用示例，同时是黄金参考（§23.7）</td><td>§02.2</td></tr>
 <tr><td><code>tools/idcell_cli.c</code></td><td>727</td><td>主机侧 CLI，五个子命令（§23.6）</td><td>§08.3</td></tr>
-<tr><td><code>tests/selftest.c</code></td><td>1504</td><td>一致性自测的<strong>内部层</strong>（L1），12 组 221 项断言</td><td>§11.3</td></tr>
-<tr><td><code>tests/selftest_wire.c</code></td><td>685</td><td>一致性自测的<strong>字节层</strong>（L2），6 组 43 项断言。<strong>只 include 公开头</strong></td><td>§11.3、§23.9</td></tr>
+<tr><td><code>tests/selftest.c</code></td><td>1674</td><td>一致性自测的<strong>内部层</strong>（L1），13 组 235 项断言</td><td>§11.3</td></tr>
+<tr><td><code>tests/selftest_wire.c</code></td><td>830</td><td>一致性自测的<strong>字节层</strong>（L2），7 组 67 项断言。<strong>只 include 公开头</strong></td><td>§11.3、§23.9</td></tr>
 <tr><td><code>tests/idcell_wire_probe.h</code></td><td>569</td><td><strong>独立线缆探针</strong>：传输层包装、双向字节流捕获、独立 CRC-16 与独立帧解析器。<strong>刻意不 include 内部头</strong></td><td>§11.3、§23.9</td></tr>
 <tr><td><code>build.ps1</code></td><td>124</td><td>构建脚本（编译器探测、四个产物）</td><td>§23.8</td></tr>
 </tbody>
@@ -5114,8 +5180,8 @@ flowchart TB
 <thead><tr><th style="width:24%">产物</th><th style="width:76%">作用</th></tr></thead>
 <tbody>
 <tr><td><code>quickstart.exe</code></td><td>快速应用示例（§23.7）</td></tr>
-<tr><td><code>selftest.exe</code></td><td>一致性自测的<strong>内部层（L1）</strong>：<strong>12 组 221 项断言</strong>，失败即非零退出码，可直接接入 CI</td></tr>
-<tr><td><code>selftest-wire.exe</code></td><td>一致性自测的<strong>字节层（L2）</strong>：<strong>6 组 43 项断言</strong>，只判线上字节，失败即非零退出码（§23.9）</td></tr>
+<tr><td><code>selftest.exe</code></td><td>一致性自测的<strong>内部层（L1）</strong>：<strong>13 组 235 项断言</strong>，失败即非零退出码，可直接接入 CI</td></tr>
+<tr><td><code>selftest-wire.exe</code></td><td>一致性自测的<strong>字节层（L2）</strong>：<strong>7 组 67 项断言</strong>，只判线上字节，失败即非零退出码（§23.9）</td></tr>
 <tr><td><code>idcell-cli.exe</code></td><td>主机侧 CLI（§23.6）</td></tr>
 </tbody>
 </table>
@@ -5124,7 +5190,7 @@ flowchart TB
 <div class="note">
 <strong>两个套件必须一起跑。</strong>合规声明 MUST 同时给出两者的执行结果（FR-094）——只给内部层的结果，MUST NOT 视为完整；只给字节层的结果，则缺少「参考实现自身自洽」的证据。两者用于 MCU 的 L2 smoke 子集应以 NFR-057 的分层预算测量；完整 CI/HIL 套件不适用 5 秒限制。</div>
 
-<p>自测的用例组与 §11.3 套件结构逐层对应。<strong>12.x 组是字节层套件的六组</strong>，与上表分属两个产物（详见 §23.9）：</p>
+<p>自测的用例组与 §11.3 套件结构逐层对应。<strong>12.x 组是字节层套件的七组</strong>，与上表分属两个产物（详见 §23.9）：</p>
 
 <div class="table-wrap">
 <table>
@@ -5147,6 +5213,7 @@ flowchart TB
 <tr><td><b>12.4 黑盒·帧头字段合规</b><br/><span style="font-size:.86em;color:var(--muted)">v0.10 新增 · 字节层</span></td><td>编解码一致性（<strong>L2 字节层</strong>）：§09.1 每一字段</td></tr>
 <tr><td><b>12.5 黑盒·错误体的线上形态</b><br/><span style="font-size:.86em;color:var(--muted)">v0.10 新增 · 字节层</span></td><td>管道行为失败路径（<strong>L2 字节层</strong>）：错误体必带字段 + 越界写未触达设备</td></tr>
 <tr><td><b>12.6 黑盒·写是异步的</b><br/><span style="font-size:.86em;color:var(--muted)">v0.10 新增 · 字节层</span></td><td>管道行为（<strong>L2 字节层</strong>）：WRITE 帧与裁决分离</td></tr>
+<tr><td><b>12.7 黑盒·时钟测量</b><br/><span style="font-size:.86em;color:var(--muted)">v0.12 新增 · 字节层</span></td><td>编解码一致性 + 语义一致性（<strong>L2 字节层</strong>）：请求只读 <code>0xFE00</code>、响应只带 15 B CLOCK 记录、两端 TS 保持本地时刻、无既有类型表之外的帧类型（§26.2、§26.3）</td></tr>
 </tbody>
 </table>
 </div>
@@ -5197,6 +5264,7 @@ flowchart TB
 <tr><td>12.4 帧头字段</td><td>VER 等于协议版本字节；PROF 在模式枚举内；SRC 是发送方自己的 DID；DST 是接收方 DID 或广播地址；单播帧 GROUP 为 0</td><td>§09.1、SEC-064</td></tr>
 <tr><td>12.5 错误体形态</td><td>ERROR 帧含错误体；错误码为 E_RANGE；携带值域上下界与实际值；<strong>越界的写没有触达设备</strong></td><td>§09.6、FR-035</td></tr>
 <tr><td>12.6 写是异步的</td><td>WRITE 帧携带意图串与 owner_token；WRITE 帧内不含裁决结果字段</td><td>FR-078、SEC-019</td></tr>
+<tr><td>12.7 时钟测量（v0.12 追加）</td><td>测量只产生一帧 READ 与一帧 READ 响应；请求读 <code>0xFE00</code>；响应携带 15 B CLOCK 记录且无 VALUE；两端 SRC/DST 未被改写；两端 TS 各自保持本地时刻；线上无既有类型表之外的帧类型</td><td>§26.2、§26.3、FR-109、FR-110</td></tr>
 </tbody>
 </table>
 </div>
@@ -5209,6 +5277,21 @@ flowchart TB
 
 <p>两个套件由同一个构建脚本产出，退出码语义一致（断言失败即非零退出码，可直接接入 CI）。构建脚本对 <code>tests/</code> 下的源文件额外加上 <code>tests/</code> 的头搜索路径——这是黑盒套件能 include 独立探针的唯一原因，同时它<strong>不</strong>把 <code>src/</code> 加进黑盒套件的依赖：黑盒套件只 include 公开头与探针头，因此它与内部头之间没有任何编译期耦合。</p>
 
+<h3><span class="num">23.10</span>时延测绘的测试承接（v0.12 追加）</h3>
+<p>§26 的能力最容易在演示里「看起来对」：RTT 有个数、θ 有个数，界面就能画出来。但两个数可以在全是错的前提下彼此自洽——时钟时基被当成 µs、TS 被中间层拉齐、offset 用错基数，都会得到「稳定但不正确」的结果。因此这一节只问三件事：<strong>用的是不是既有帧、两端时钟有没有被改、服务响应会不会被误当成普通读数</strong>。</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th style="width:20%">层</th><th style="width:16%">产物</th><th style="width:34%">本组断言</th><th style="width:30%">证明什么</th></tr></thead>
+<tbody>
+<tr><td><strong>L1 内部层</strong></td><td><code>selftest.exe</code> 第 13 组</td><td>未测量时无结果；请求后为等待；有限轮内完成；tick/epoch/quality 原样保留；RTT 量级正确；θ ≈ 已知偏移；不确定度非零且有界；读数补偿把设备计数映射回发起端轴</td><td>参考实现自身自洽：测量状态机、θ 公式与补偿函数没有接错基数</td></tr>
+<tr><td><strong>L2 字节层</strong></td><td><code>selftest-wire.exe</code> 12.7 组</td><td>只有既有 READ/响应；请求 VALUE 的 idx 是 <code>0xFE00</code>；响应含 15 B CLOCK 且无 VALUE；请求/响应 SRC/DST 端到端不变；请求 TS 是发起端时刻、响应 TS 是设备时刻；无未知帧类型</td><td>跨厂商可复用：判据只有「线上字节是什么」，不依赖参考实现的内部结构</td></tr>
+</tbody>
+</table>
+</div>
+<div class="note">
+<strong>12.7 里最值得单独说的两条。</strong>第一条是「响应无 VALUE」：如果实现把时钟服务点的响应编码成普通 VALUE（哪怕值就是 counter），它就会进入能力点的值通路，被老订阅者当成一个物理量、被质量码标注、被失效降级——服务点与能力点的边界一旦模糊，<code>0xFE00 ~ 0xFEFF</code> 的保留区就失去意义。第二条是「两端 TS 各自保持本地时刻」：若实现把设备 TS 改写成发起端轴，字节层会立刻看见——而这正是「读数补偿」与「节点自校准」的分界。<strong>不修改任何一端时钟，是本轮选择单跳只读补偿的技术兑现，不是一句口号。</strong>
+</div>
+
 <div class="verdict">
 <h3>本章结论</h3>
 <p>参考实现把前述二十二章规范正文压缩成了一次用户交互：<strong>填三项信息（我是谁、我能做什么、我要什么），调一个函数（poll），接一条链路</strong>。这三条约束分别由 §23.3（适配器 + 链路画像）、§23.4（三种注册语义）、§23.5（单一 poll 入口）固定下来，并由 FR-074 ~ FR-078 落成可验收条目。§23.7 的 quickstart 同时是说明书与黄金参考，使 §11.3 的一致性套件第一次有了「行为级」的移植判据——此前套件只能比对字节，而字节级判据无法跨语言。本章未新增任何协议语义：全部 10 条新条目（FR 5 条、NFR 3 条、SEC 2 条）都落在既有机制上，其中最关键的一条是 FR-078——<strong>写是异步的，本地返回值不是裁决</strong>。这条若不写进规范，每个实现者都会各自决定「写成功」到底意味着「请求发出」还是「值已生效」，而这两种含义在真实机器人上的差别，是执行器有没有被推到不该去的位置。</p>
@@ -5216,6 +5299,7 @@ flowchart TB
 <p><strong>v0.9 起，参考实现再增 §24.8 的值类型协商与 §24.9 的链路适配三层</strong>：新增 <code>src/idcell_type.c</code>（类型成本序、可行性过滤、两步协商算法）与 <code>accept_types</code> TLV（能力描述符 <code>0x57</code> / 需求描述符 <code>0x6A</code>），值载荷按协商出的 <code>(dtype, scale)</code> 编码而不是一律裸浮点。自测扩到 <strong>12 组 175 项</strong>，新增 3c 验类型成本序与定点可行性过滤。量种表同时支持编译期裁剪（<code>IDCELL_QTY_TABLE_MINIMAL</code>，FR-089），裁剪配置下自测 173 项通过。</p>
 <p><strong>v0.10 起，参考实现的自测分成两个产物</strong>：<code>selftest.exe</code>（L1 内部层，175 项）与 <code>selftest-wire.exe</code>（L2 字节层，42 项）。后者只 include 公开头，自带一份独立的帧解析器与 CRC 计算器，把断言的观察点从「内部函数的返回值」搬到「链路上真实出现过的字节」。这不是把旧套件重写一遍——内部层断言的价值没有被否定，它仍然是定位问题的利器——而是<strong>补上了此前完全缺失的一层证据</strong>：在补上它之前，参考实现的自测能证明「参考实现是自洽的」，却证明不了「参考实现符合规范」；而后者才是 §11.3 一致性套件存在的理由。新增的 6 组字节层断言覆盖 §09.1 帧字段表的每一项、§08.12 的 CRC 覆盖范围、六段管道在线上的帧痕迹、能力描述符的字段完整性、错误体的必带字段，以及「写是异步的」这条 FR-078 红线。落地成 FR-091 ~ FR-094、NFR-057、SEC-071 共 6 条。</p>
 <p><strong>v0.11 起，C 参考实现已完成帧、流解析与契约写安全升级</strong>：STD 固定头 36 B（新增 LEN）、可选 16 B AUTH_TAG、统一 TYPE 编号、坏帧后有界重同步，并新增 <code>idcell_schema.c</code>、<code>idcell_v11_vectors.c</code>、<code>idcell_contract_vectors.c</code> 及两个 Python 差分脚本。当前结果为 L1 221 项、L2 43 项、契约行为 162 项、发现/休眠 141 项、安全行为 137 项，帧/契约/发现/安全差分分别为 273/21/54/27 项通过；Python 模拟为 75 项单测与 26 个命名场景通过。该进度覆盖 §25.9 的第 1～3 步及预共享模型下的描述/会话安全；多字段 codec、EDHOC/PKI、完整 mesh 与真实硬件仍未完成。</p>
+<p><strong>v0.12 起，参考实现把「时延测绘」收进主库而不是测试脚本</strong>：新增协议保留服务点 <code>0xFE00</code>（只读）、<code>idcell_node_set_clock_source</code>、<code>idcell_node_measure_clock</code>、<code>idcell_node_measure_clock_result</code> 与 <code>idcell_clock_map_ns</code>。测量复用既有 READ / READ 响应，响应载荷是 15 B 的 CLOCK 记录而不是 VALUE；<strong>没有新增帧类型、没有新增错误码、没有改写 TS</strong>。自测扩到 <strong>L1 235 项、L2 67 项</strong>：新增第 13 组（未测量无结果、等待态、有限轮完成、tick/epoch/quality 保留、RTT 量级、θ ≈ 已知偏移、不确定度有界、读数补偿映射）与 12.7 组（只有既有 READ、请求 idx 为 0xFE00、响应无 VALUE、SRC/DST 不变、两端 TS 各自本地、无未知帧类型）。这一轮刻意<strong>不把 RTT/2 说成单程时延，也不把 θ 说成绝对时间</strong>——实现只报告测不准上界，让上层自己决定它够不够用。</p>
 </div>
 </section>
 <section>
@@ -5756,7 +5840,7 @@ flowchart TB
 <h3><span class="num">25.9</span>落地顺序与现有实现差距</h3>
 <p>截至 2026-11-04，C 参考实现已完成本节的第 1 步帧与解析安全、第 2 步契约写安全、第 3 步发现/休眠，并进一步实现公共/授权描述分离、预共享模型下的节点会话密钥及同会话 SEQ 反重放；均通过 C/Python 差分验证。完整 mesh 路由、EDHOC/PKI、硬件熵源和真实硬件分区恢复仍未完成。新增安全上下文、发现缓存与命令队列后的 MCU RAM 必须重新实测，不得沿用旧预算结论。</p>
 <ol>
-<li><strong>帧与解析安全（已完成）：</strong>36 B STD 头、LEN 上限、跨 poll 半帧、AUTH_TAG、统一 TYPE 表与独立 L2 向量已实现；C 221 项、独立线上 43 项、C/Python 差分 273 项通过。</li>
+<li><strong>帧与解析安全（已完成）：</strong>36 B STD 头、LEN 上限、跨 poll 半帧、AUTH_TAG、统一 TYPE 表与独立 L2 向量已实现；C 235 项、独立线上 67 项、C/Python 差分 273 项通过。</li>
 <li><strong>生命周期与契约写安全（已完成当前标量 profile）：</strong>已实现逐点 schema、固定标准 ID 与 digest、session/grant epoch、两阶段 BIND、真实 RENEGOTIATE、执行器级单写者、命令 FIFO/过期/幂等、重启快照和契约外读写拒绝；162 项 C 行为测试与 21 项高层差分通过。公共/授权描述分离、会话密钥与 SEQ 反重放另由 137 项 C 安全测试和 27 项独立差分覆盖；多字段 codec 仍属后续 profile。</li>
 <li><strong>发现与休眠（软件路径已完成）：</strong>统一 ANNOUNCE、主动 PROBE、退避/周期分离、TTL/LRU、target/query、保真转发、CHECK-IN、wake_profile、suspended 与有限睡眠队列已实现；141 项 C 行为测试和 54 项差分通过。真实无线电、代理硬件及完整 mesh 未验证。</li>
 <li><strong>分布式与安全：</strong>实现多控制器、转发去重、端到端保护、分区 fencing 与恢复；随后再跑多介质和第三方独立实现。</li>
@@ -5764,6 +5848,146 @@ flowchart TB
 <p>每一步必须同时更新线上参考向量、L2 字节测试与 L3 行为测试；旧格式回归可以保留为 legacy 套件，但不得冒充 v0.11 合规结果。</p>
 
 <div class="verdict"><h3>本章结论</h3><p>协议全周期由四类上下文共同支撑：<strong>链路负责如何到达，schema 负责如何解释，契约负责允许什么，授权纪元负责当前是否仍有效</strong>。发现、休眠、分布式转发和实时编码可以分档实现，但这四类上下文及其失效边界不得分档删除。</p></div>
+</section>
+
+<section>
+<h2 id="sec-26"><span class="num">26</span>单跳时延测绘与读数补偿</h2>
+
+<p>「时延测试」与「时间同步」常被当作同一个需求提出来，实际是两件事：前者问<strong>这一段链路有多慢</strong>，后者问<strong>两个节点的计数差多少</strong>。前者不需要任何时间共识就能成立；后者一旦跨出单跳，就会同时碰到身份、权限、定时器与安全四套机制。本章的结论因此分两句：<strong>时延测绘可以内生，而且不需要新帧类型；时间同步只做消费侧补偿，设备时钟零改动</strong>。这不是保守，而是把「能测」与「能改」划清——本章不提供全局时间轴，也不允许任何实现借「测量」之名改写时间。</p>
+
+<div class="verdict">
+<h3>本章要回答的三个问题</h3>
+<p><strong>问题一：</strong>时延测绘能不能不引入新的线上消息？<strong>能</strong>——复用 <code>READ</code> 读协议保留服务点 <code>0xFE00</code>，一次往返就是一次测量（§26.2、§26.3）。</p>
+<p><strong>问题二：</strong>时间同步能不能内生？<strong>只到「读数补偿」为止</strong>——消费方用测量得到的 θ 把设备计数映射回自己的轴，设备侧一个计数都不改（§26.5）。节点自校准会打乱租约 TTL、心跳与过期判定，v1 不做。</p>
+<p><strong>问题三：</strong>多跳逐段测绘能不能做？<strong>本 profile 不做</strong>——它需要逐跳改写路径、O(k²) 反向接力和逐跳审计，属于另一个转发 profile，必须独立评审（§26.4、§26.6）。</p>
+</div>
+
+<h3><span class="num">26.1</span>定位：测量不是同步，补偿不是校准</h3>
+
+<p>先把三个词分开，否则后面的每条需求都会被误读：</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th style="width:16%">词</th><th style="width:28%">回答的问题</th><th style="width:30%">是否需要跨节点时间共识</th><th style="width:26%">本规范是否提供</th></tr></thead>
+<tbody>
+<tr><td><b>时延测绘</b><br/>latency probing</td><td>从 A 发一帧到收到 B 的响应，往返用了多久？</td><td><strong>不需要</strong>：RTT 完全在 A 的单侧时钟上量得</td><td><strong>提供</strong>：单跳，复用 READ</td></tr>
+<tr><td><b>读数补偿</b><br/>read-side compensation</td><td>B 的某个计数，换算到 A 的轴上是多少？</td><td>需要一次单跳测量得到的 θ，但<strong>不修改任何一端时钟</strong></td><td><strong>提供</strong>：消费侧映射（§26.5）</td></tr>
+<tr><td><b>时间同步 / 校准</b><br/>clock synchronization</td><td>让 B 的时钟真的等于 A 的时钟（或全局时钟）</td><td>需要步进或速率调整 B 的计数，并引入双计数域</td><td><strong>不提供</strong>：明确排除（§13、§26.6）</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>这三者的差别不是措辞。时延测绘的误差来自路径不对称，读数补偿的误差来自 θ 的测不准，而时间同步的误差会<strong>直接改变 B 的本地定时</strong>——租约什么时候到期、心跳什么时候该发、命令什么时候过期，全都建立在同一个单调计数上。把测量说成同步，等于让上层以为可以拿一个诊断值去做安全裁决；把补偿说成校准，等于悄悄把设备的时间改掉却不愿承担双计数域的代价。本章两条都不做。</p>
+
+<h3><span class="num">26.2</span>时钟服务点：一个保留索引，一条定长记录</h3>
+
+<p>服务点选在 <code>0xFE00</code>，属于 <code>0xFE00 ~ 0xFEFF</code> 的协议保留区。它有三个刻意的「不」：</p>
+
+<ul>
+<li><strong>不参与 MATCH</strong>。它不是能力点，没有量种、单位、值域，也不应该出现在公共描述符里。否则「设备有没有时钟服务」会变成匹配失败的理由，把零配置接入变成又一道门槛。</li>
+<li><strong>不进 <code>cap_list</code></strong>。它不随契约点集合下发，也不受契约点的失效/降级传播影响。测量是诊断行为，不是数据面订阅。</li>
+<li><strong>不返回 <code>VALUE</code></strong>。响应里承载的是 CLOCK 记录，不是被当成某个物理量的读数。若把 counter 编码成 VALUE，它会进入值通路，被老订阅者当成物理量、被质量码标注、被失效降级——服务点与能力点的边界一旦模糊，保留区就失去意义。</li>
+</ul>
+
+<p>CLOCK 记录是 15 字节定长，字段顺序固定，不做 TLV 嵌套：</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th style="width:14%">偏移</th><th style="width:16%">字段</th><th style="width:10%">宽度</th><th style="width:60%">语义</th></tr></thead>
+<tbody>
+<tr><td>0</td><td><code>counter</code></td><td>8 B</td><td>设备<strong>本地单调计数</strong>的原值。不是墙钟，不是全局时间，也不是被任何一方改写过的「同步时间」</td></tr>
+<tr><td>8</td><td><code>tick_ns</code></td><td>4 B</td><td>一个计数单位等于多少纳秒。<strong>MUST 由设备声明</strong>；协议不默认 µs。设备只有 1 ms 计数时基时填 <code>1000000</code>，而不是假装自己是 µs</td></tr>
+<tr><td>12</td><td><code>epoch</code></td><td>2 B</td><td>计数域世代。设备重启或计数初始化时 MUST 递增。<strong>跨 epoch 的计数没有可比性</strong></td></tr>
+<tr><td>14</td><td><code>quality</code></td><td>1 B</td><td>计数来源档：0 参考源 / 1 已校准 / 2 自由运行。它描述「这个数从哪来」，不描述「它准不准」——准不准由 §26.3 的测不准上界表达</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><strong>为什么是定长而不是 TLV 嵌套。</strong>交底书里每个节点记录是 14 B 定长，按 <code>base + idx × len</code> 一次寻址。ID-CELL 的多字段消息结构（§25.2）允许 TLV，也允许「声明了 schema 的定长布局」；这里选后者，是为了让只有几十 KB RAM 的节点不必为一条诊断记录做递归解析。TLV 的灵活性留给能力描述符与错误体，不留给每毫秒都要处理的服务记录。</p>
+
+<h3><span class="num">26.3</span>单跳测量的线上时序与公式</h3>
+
+<p>一次测量只有两步，全部使用既有帧类型：</p>
+
+<ol>
+<li><strong>发起方 → 设备：</strong><code>READ</code>，载荷含一个 <code>VALUE</code> TLV（<code>idx = 0xFE00</code>、<code>sub = 0</code>、长度 0），以及绑定/会话/授权纪元上下文。发起方在<strong>发出这一帧的时刻</strong>用本地高精度计数记下 <code>t0</code>。</li>
+<li><strong>设备 → 发起方：</strong><code>READ</code> 响应，载荷含 15 B CLOCK 记录与同一套上下文。发起方在<strong>收到这一帧的时刻</strong>记下 <code>R</code>。</li>
+</ol>
+
+<p>于是：</p>
+
+<pre><code>RTT  = R − t0
+d    = RTT / 2                    （仅在路径对称时才是单程时延）
+θ    = counter × tick_ns − (t0 + d)
+u    = tick_ns / 2 + 发起端取样分辨率</code></pre>
+
+<p>四个量里，只有 RTT 是<strong>无条件成立</strong>的：它只用了发起方自己的时钟。θ 依赖「往返对称」这个假设，因此实现 <strong>MUST</strong> 同时报告测不准上界 <code>u</code>，并 <strong>MUST NOT</strong> 把 RTT/2 表述为可靠的单程时延。在 CSMA、异步串口、存储转发链路上，请求与响应走的根本不是同一条时间路径；此时 RTT 仍然可信（它确实是一次往返的总时间），但 θ 只能算「在对称假设下的估计」。</p>
+
+<p><strong>计数域必须先对齐。</strong>发起方拿到的 <code>epoch</code> 必须与它缓存的同一对端 epoch 相同，否则这次测量只能用于 RTT，不能用于 θ。设备重启后 counter 可能从 0 重新开始，若实现不做 epoch 校验，就会得到一个「看起来很小、实际完全错」的偏移。这条不是防御性编程，而是把「本地计数」与「绝对时间」分开的必然结果。</p>
+
+<p><strong>为什么 t0/R 不用帧头 TS。</strong>帧头 <code>TS</code> 的语义是「发送方的本地时间戳」，它的分辨率由设备实现决定（参考实现是 µs，但别的实现可能是 ms）。把测量建立在帧头 TS 上，就把「发起方的测量精度」绑在了「对端的编码精度」上——而发起方完全可以用自己的高精度计数，不必受对端影响。帧头 TS 仍然按 §09.1 的原义使用：给新鲜度、时序与诊断看，不参与测量公式。<strong>这也是 12.7 组要断言「两端 TS 各自保持本地时刻」的原因</strong>。</p>
+
+<h3><span class="num">26.4</span>为什么不做多跳逐段测绘</h3>
+
+<p>交底书的核心能力是<strong>沿一条指定节点序列逐跳盖戳</strong>，每一跳都对同一轮的相邻段做一次反向接力，从而在「同一 t0 快照」下得到逐段时延与相对偏移。这个能力在 ID-CELL 里不是「多写几行转发」就能拿到的，它同时撞上三堵墙：</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th style="width:20%">墙</th><th style="width:44%">为什么撞</th><th style="width:36%">本规范的处置</th></tr></thead>
+<tbody>
+<tr><td><b>端到端身份</b></td><td>ID-CELL 的 <code>SRC/DST</code> 是协议主体，不是逐跳地址。交底书靠改写每跳的地址来指路；在 ID-CELL 里改写 <code>SRC/DST</code> 会让接收方看到一个不是发起方的源，破坏 §25.1 的端到端语义与审计</td><td>路径只能作为 <strong>payload 内的源路由列表</strong>携带；逐跳只递减 <code>hop_limit</code> 并追加 provenance。<strong>本 profile 不实现</strong></td></tr>
+<tr><td><b>O(k²) 反向接力</b></td><td>k 跳路径上，每一跳都要为相邻段生成一条反向消息，总段数是 k(k−1)/2 量级。这既是带宽放大，也是权限与审计的放大：每个转发节点都要有转发权、都要留下可核查的记录</td><td>只在独立 <code>forwarding</code> profile 中允许；<strong>本 profile 不做</strong>，避免把诊断流量变成放大通道（SEC-077）</td></tr>
+<tr><td><b>本地定时器</b></td><td>一旦允许节点按 θ 步进自己的计数，租约 TTL、心跳周期、命令过期都会跟着跳。ID-CELL 的这些判定都建立在本地单调计数上，没有双计数域就无法安全地「改时间」</td><td><strong>只做读数补偿</strong>：不改设备时钟，θ 不进入任何安全定时判定（FR-111、SEC-078）</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>还有一条更根本的理由：<strong>逐段测绘会把「测量」变成「拓扑发现」</strong>。一条路径上的逐跳盖戳天然暴露了节点序列、每段时延与相对位置；在 ID-CELL 的定位里，拓扑发现属于 §25.4 的主动探测，有它自己的权限、去重与资源上限，不能借「测时延」顺带完成。把两件事混在一起，最后两边都做不干净。</p>
+
+<h3><span class="num">26.5</span>读数补偿：只改消费侧，不改设备</h3>
+
+<p>交底书给了三种应用方式：读数端补偿、节点自校准、发起方聚合。本规范只取第一种，并且把它写成一条明确的消费规则：</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th style="width:18%">方式</th><th style="width:30%">做什么</th><th style="width:22%">风险</th><th style="width:30%">本规范</th></tr></thead>
+<tbody>
+<tr><td><b>读数补偿</b></td><td>消费方保存 <code>(θ, epoch, u)</code>，把设备计数映射到自己的轴：<code>mapped = counter × tick_ns − θ</code></td><td>低：不改任何一端时钟，原始计数仍可回溯；误差有上界</td><td><strong>提供</strong>（默认且唯一形态）</td></tr>
+<tr><td><b>节点自校准</b></td><td>把 θ 写回设备，设备步进或调整自己的计数</td><td>高：打乱 TTL/心跳/过期；需要双计数域与 <code>epoch</code> 规则</td><td><strong>不提供</strong></td></tr>
+<tr><td><b>发起方聚合</b></td><td>主控端把多台设备的时间戳统一映射到主机轴</td><td>中：等价于对每台设备各做一次读数补偿，但需要逐台保存 epoch</td><td>可由 <strong>读数补偿</strong>组合得到，不另立机制</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>读数补偿有三条硬约束：</p>
+
+<ol>
+<li><strong>epoch 必须相同。</strong>映射前先比较样本 epoch 与测量结果 epoch；不同就拒绝映射，而不是「尽力算一个近似值」。</li>
+<li><strong>补偿值不进安全定时。</strong>θ 只能用于展示、排序、打戳、离线分析这类<strong>可回退</strong>的用途。租约到期、心跳超时、命令过期 MUST 继续用本地单调计数，否则一次错误补偿就会变成一次误释放或误过期。</li>
+<li><strong>不确定度必须随值一起传。</strong>只传一个 <code>mapped</code> 数字，等于把测不准藏起来。消费方 MUST 拿到 <code>u</code>，并在 u 超过其业务容忍度时拒绝使用该补偿。</li>
+</ol>
+
+<p>这也解释了为什么参考实现只提供了一个 <code>idcell_clock_map_ns</code> 纯函数：它不做任何隐式状态，不缓存 θ，也不替调用方决定「这个误差能不能用」。补偿是消费方的决定，不是协议偷偷替它做的决定。</p>
+
+<h3><span class="num">26.6</span>边界、声明与将来扩展</h3>
+
+<p>本能力标记为 <code>time-probe</code> 功能 profile。参考实现<strong>不新增 HELLO 字段</strong>来声明它：主机首次对 <code>0xFE00</code> 发起 READ，若得到 <code>E_NODEV</code> 即视为不支持，并 MUST 按对端缓存该结论，MUST NOT 反复试探。这样做的理由是——如果为「支不支持测时延」再加一个声明字段，就等于承认它是一个接入前置条件；而它恰恰不是。</p>
+
+<p>明确排除、且不得在 <code>time-probe</code> 名下悄悄实现的四件事：</p>
+
+<ul>
+<li><strong>多跳逐段测绘</strong>：需要源路由、逐跳接力、逐跳权限与审计，属于独立 <code>forwarding</code> profile。</li>
+<li><strong>节点自校准</strong>：需要双计数域、步进规则与 <code>epoch</code> 迁移语义，属于独立 <code>clock-sync</code> profile。</li>
+<li><strong>全局时间轴 / 绝对墙钟</strong>：ID-CELL 不建立分布式时钟，任何「当前时间」都不是本协议能承诺的量。</li>
+<li><strong>用测量替代存活/健康判定</strong>：RTT 变大或测量超时可能只是排队或休眠，不能据此宣布对端离线；存活判定仍走 §08.4 的保活三时钟。</li>
+</ul>
+
+<p>将来若要做多跳或自校准，扩展路径是明确的：另立 profile、另立帧类型（若确有必要）、在规范里新增逐跳审计与双计数域规则；<strong>不得把 <code>0xFE00</code> 的响应扩成路径记录，也不得把 θ 直接写进设备</strong>。这条边界不是保守，而是为了避免「一个诊断能力慢慢长成一套分布式时钟，却没有人对它做过安全评审」。</p>
+
+<div class="verdict">
+<h3>本章结论</h3>
+<p>时延测绘可以内生，因为它的判据只需要<strong>发起方自己的时钟和线上真实出现过的两帧</strong>；时间同步只能做到读数补偿，因为再往前一步就会碰到<strong>本地定时器与步进时钟</strong>这组不能免费跨越的约束。本章因此把「测什么」写得很实：单跳 RTT、带测不准的 θ、可校验 epoch 的映射；把「不测什么」写得更实：多跳、校准、绝对时间、存活替代。<strong>能测单跳时延，不等于拥有分布式时钟；能补偿读数，不等于能改写时间。</strong>这两句话如果含糊，协议就会在下一次「顺手加个同步」的改动里失去它最珍贵的性质——零配置接入不需要时间共识。</p>
+</div>
 </section>
 <footer>
 <div class="sources">

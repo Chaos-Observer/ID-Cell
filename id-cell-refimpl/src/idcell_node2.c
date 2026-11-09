@@ -2383,6 +2383,78 @@ int idcell_node_read(idcell_node_t *n, const idcell_did_t *peer,
     return IDCELL_E_NODEV;
 }
 
+/* ---------------------------------------------------------------- 时钟测量 */
+
+/*
+ * v0.12：发起一次单跳测量（§26.3）。
+ *
+ * 线上只有一帧 READ + 一帧 READ 响应，两者都是既有帧类型；没有新增
+ * 帧类型、没有 SYNC 帧、没有改写 SRC/DST。t0 用发起端本地计数记录，
+ * rtt 完全在发起端单侧时钟上量得——这一步不需要任何跨节点同步。
+ */
+int idcell_node_measure_clock(idcell_node_t *n, const idcell_did_t *peer,
+                              uint32_t now_ms)
+{
+    int i;
+    if (!n || !peer) return IDCELL_E_NODEV;
+    if (n->asleep) return node_sleep_error(n);
+    for (i = 0; i < IDCELL_MAX_PEERS; i++) {
+        idcell_peer_t *p = &n->peers[i];
+        uint8_t payload[128];
+        uint16_t pos = 0;
+        if (!p->used || !idcell_did_equal(&p->did, peer)) continue;
+        if (!p->has_contract || !peer_lease_valid(n, p)) return IDCELL_E_LEASE;
+        if (p->contract.perm < IDCELL_PERM_P1) return IDCELL_E_PERM;
+        idcell_tlv_put(payload, sizeof(payload), &pos, IDCELL_SVC_CLOCK_INDEX, 0,
+                       IDCELL_TLV_VALUE, NULL, 0);
+        put_write_context(payload, sizeof(payload), &pos, &p->contract);
+        n->now_ms = now_ms;
+        n->ts_us = (uint64_t)now_ms * 1000ULL;
+        p->meas_t0_ns = n->ts_us * 1000ULL;
+        p->meas_txn = ++p->txn;
+        p->meas_pending = 1;
+        p->meas_valid = 0;
+        if (node_send(n, IDCELL_FT_READ, &p->did, 0, p->meas_txn, payload, pos)
+            != IDCELL_OK) {
+            p->meas_pending = 0;
+            return IDCELL_E_UNSAFE;
+        }
+        return IDCELL_OK;
+    }
+    return IDCELL_E_NODEV;
+}
+
+int idcell_node_measure_clock_result(const idcell_node_t *n,
+                                      const idcell_did_t *peer,
+                                      idcell_clock_measure_t *out)
+{
+    int i;
+    if (!n || !peer || !out) return IDCELL_E_NODEV;
+    for (i = 0; i < IDCELL_MAX_PEERS; i++) {
+        const idcell_peer_t *p = &n->peers[i];
+        if (!p->used || !idcell_did_equal(&p->did, peer)) continue;
+        if (p->meas_pending) return 0;
+        if (!p->meas_valid) return IDCELL_E_NODEV;
+        out->counter         = p->meas_counter;
+        out->tick_ns         = p->meas_tick_ns;
+        out->epoch           = p->meas_epoch;
+        out->quality         = p->meas_quality;
+        out->rtt_ns          = p->meas_rtt_ns;
+        out->offset_ns       = p->meas_offset_ns;
+        out->uncertainty_ns  = p->meas_uncertainty_ns;
+        return 1;
+    }
+    return IDCELL_E_NODEV;
+}
+
+int64_t idcell_clock_map_ns(const idcell_clock_measure_t *m, uint64_t counter)
+{
+    uint32_t tick = 1u;
+    if (!m) return 0;
+    if (m->tick_ns) tick = m->tick_ns;
+    return (int64_t)(counter * (uint64_t)tick) - m->offset_ns;
+}
+
 static uint64_t write_payload_fingerprint(const idcell_frame_t *f)
 {
     uint64_t h = 0xCBF29CE484222325ULL;
@@ -2679,6 +2751,43 @@ static void node_on_read(idcell_node_t *n, const idcell_frame_t *f)
     }
     if (session != p->contract.session_id || grant != p->contract.grant_epoch) {
         node_send_error(n, &f->src, f->txn, IDCELL_E_LEASE, "READ", -1, -1, "旧会话或授权纪元");
+        return;
+    }
+    /*
+     * v0.12：0xFE00 是协议保留服务点（§26.2），不参与 MATCH，也不在
+     * cap_list 里。它只对「已通过绑定/会话/授权纪元校验」的对端开放，
+     * 因此上面的三道校验必须先过。未注册时钟源时按 E_NODEV 拒绝。
+     */
+    if (idx == IDCELL_SVC_CLOCK_INDEX && sub == 0) {
+        idcell_clock_sample_t cs;
+        uint8_t payload[160], raw[15];
+        uint16_t opos = 0;
+
+        if (!n->clock_fn) {
+            node_send_error(n, &f->src, f->txn, IDCELL_E_NODEV, "CLOCK", -1, -1,
+                            "时钟服务未启用");
+            return;
+        }
+        if (p->contract.perm < IDCELL_PERM_P1) {
+            node_send_error(n, &f->src, f->txn, IDCELL_E_PERM, "CLOCK",
+                            IDCELL_PERM_P1, p->contract.perm, "时钟服务权限不足");
+            return;
+        }
+        memset(&cs, 0, sizeof(cs));
+        if (n->clock_fn(n->clock_ud, &cs) != IDCELL_OK) {
+            node_send_error(n, &f->src, f->txn, IDCELL_E_NODEV, "CLOCK", -1, -1,
+                            "取时钟失败");
+            return;
+        }
+        memset(raw, 0, sizeof(raw));
+        idcell_put_u64(raw, cs.counter);
+        idcell_put_u32(raw + 8, cs.tick_ns);
+        idcell_put_u16(raw + 12, cs.epoch);
+        raw[14] = cs.quality;
+        idcell_tlv_put(payload, sizeof(payload), &opos, 0, 0,
+                       IDCELL_TLV_CLOCK, raw, (uint16_t)sizeof(raw));
+        put_write_context(payload, sizeof(payload), &opos, &p->contract);
+        node_send(n, IDCELL_FT_READ, &f->src, 0, f->txn, payload, opos);
         return;
     }
     cp = contract_point(p, idx, sub);
@@ -3243,7 +3352,8 @@ static void node_on_runtime_value(idcell_node_t *n, const idcell_frame_t *f,
                                   idcell_peer_t *p)
 {
     const idcell_tlv_t *value_tlv = NULL;
-    idcell_tlv_t value_copy;
+    const idcell_tlv_t *clock_tlv = NULL;
+    idcell_tlv_t value_copy, clock_copy;
     idcell_contract_point_t *cp;
     idcell_pt_t *pt = NULL;
     uint16_t pos = 0, idx = 0, schema_ref = 0;
@@ -3260,6 +3370,7 @@ static void node_on_runtime_value(idcell_node_t *n, const idcell_frame_t *f,
     while ((rc = idcell_tlv_next(f->payload, f->payload_len, &pos, &t)) == 0) {
         switch (t.type) {
         case IDCELL_TLV_VALUE: value_copy = t; value_tlv = &value_copy; idx = t.idx; sub = t.sub; break;
+        case IDCELL_TLV_CLOCK: clock_copy = t; clock_tlv = &clock_copy; break;
         case IDCELL_TLV_PROV: prov = (idcell_prov_t)tlv_u8(&t, 0); break;
         case IDCELL_TLV_QUALITY: quality = (idcell_quality_t)tlv_u8(&t, 0); break;
         case IDCELL_TLV_BIND_ID: binding = tlv_u32(&t, 0); break;
@@ -3270,9 +3381,37 @@ static void node_on_runtime_value(idcell_node_t *n, const idcell_frame_t *f,
         default: break;
         }
     }
-    if (rc < 0 || !value_tlv || binding != p->contract.binding_id ||
+    if (rc < 0 || binding != p->contract.binding_id ||
         session != p->contract.session_id || grant != p->contract.grant_epoch)
         return;
+    /*
+     * v0.12：时钟服务点的响应不是「能力点的值」，它没有 VALUE TLV，
+     * 也不进 pt/cap_list。这里只认「本对端确实有一次未决测量，且 txn 相同」
+     * 的 CLOCK 回包，避免把服务帧误当成普通读数（§26.3）。
+     */
+    if (clock_tlv) {
+        if (clock_tlv->len >= 15 && p->meas_pending && f->txn == p->meas_txn) {
+            uint64_t rtt_ns, d_ns, counter_ns;
+            uint32_t tick_ns = idcell_get_u32(clock_tlv->val + 8);
+
+            p->meas_counter  = idcell_get_u64(clock_tlv->val);
+            p->meas_tick_ns  = tick_ns;
+            p->meas_epoch    = idcell_get_u16(clock_tlv->val + 12);
+            p->meas_quality  = clock_tlv->val[14];
+            rtt_ns = n->ts_us * 1000ULL - p->meas_t0_ns;
+            p->meas_rtt_ns = rtt_ns;
+            d_ns = rtt_ns / 2;
+            /* tick_ns 未声明时按 1 ns 计，但 uncertainty 会被标成不可信 */
+            counter_ns = p->meas_counter * (uint64_t)(tick_ns ? tick_ns : 1u);
+            p->meas_offset_ns = (int64_t)counter_ns -
+                                (int64_t)(p->meas_t0_ns + d_ns);
+            p->meas_uncertainty_ns = (uint32_t)((tick_ns ? tick_ns / 2 : 0u) + 1000u);
+            p->meas_pending = 0;
+            p->meas_valid = 1;
+        }
+        return;
+    }
+    if (!value_tlv) return;
     cp = contract_point(p, idx, sub);
     if (!cp || (schema_ref && schema_ref != cp->schema_ref) ||
         (schema_id && schema_id != cp->schema_id)) return;

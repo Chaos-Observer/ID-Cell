@@ -1488,6 +1488,159 @@ static void test_period_redline(void)
     idcell_loopback_free(lb);
 }
 
+/* ---------------------------------------------------------------- 13. 时钟 */
+
+typedef struct {
+    uint64_t base_ns;       /* 设备计数轴相对发起端轴的偏移 */
+    uint32_t *now_ms;       /* 指向场景时钟，保证两端同源推进 */
+    uint16_t epoch;
+    uint8_t  quality;
+} clk_state_t;
+
+static int dev_clock(void *ud, idcell_clock_sample_t *out)
+{
+    clk_state_t *c = (clk_state_t *)ud;
+    out->counter = c->base_ns / 1000ULL + (uint64_t)(*c->now_ms) * 1000ULL;
+    out->tick_ns = 1000;   /* 一个计数单位 = 1 µs */
+    out->epoch = c->epoch;
+    out->quality = c->quality;
+    return IDCELL_OK;
+}
+
+/*
+ * v0.12 · §26：单跳时延测绘与读数补偿。
+ *
+ * 这一组断言的是「内生形态」的三件事：
+ *   1. 测量只走既有 READ/READ 响应，没有新帧类型；
+ *   2. RTT 完全由发起端单侧时钟量得，不需要跨节点同步；
+ *   3. 设备时钟零改动，补偿只发生在消费侧。
+ */
+static void test_time_sync(void)
+{
+    idcell_loopback_t *lb;
+    idcell_transport_t tr_a, tr_b;
+    idcell_node_t *dev = NULL, *host = NULL;
+    dev_state_t st;
+    idcell_node_cfg_t cfg;
+    idcell_requirement_t req;
+    idcell_did_t did;
+    idcell_contract_t ct;
+    idcell_clock_measure_t m;
+    clk_state_t clk;
+    uint32_t now = 0;
+    int i, bound = 0, ready = 0;
+    int64_t mapped, expect;
+
+    group("13. 单跳时延测绘与读数补偿");
+
+    lb = idcell_loopback_new();
+    idcell_loopback_endpoints(lb, &tr_a, &tr_b);
+    make_dev(&dev, &tr_a, &st);
+
+    memset(&cfg, 0, sizeof(cfg));
+    idcell_did_generate(0x5555, &cfg.did);
+    memset(cfg.cred, 0x5A, sizeof(cfg.cred));
+    cfg.max_perm = IDCELL_PERM_P2;
+    cfg.proficiency = 2;
+    cfg.t_hb_ms = 1000;
+    cfg.lease_ttl_ms = 3000;
+    cfg.announce_ms = 200;
+    snprintf(cfg.vendor, sizeof(cfg.vendor), "Robotics");
+    snprintf(cfg.model, sizeof(cfg.model), "ArmCtrl");
+
+    host = idcell_node_new(&cfg);
+    idcell_node_set_transport(host, &tr_b);
+
+    memset(&req, 0, sizeof(req));
+    snprintf(req.label, sizeof(req.label), "机器人要的加速度");
+    req.qty = IDCELL_QTY_ACCELERATION;
+    snprintf(req.unit, sizeof(req.unit), "m/s2");
+    req.accept_count = 1;
+    snprintf(req.accept_units[0], sizeof(req.accept_units[0]), "m/s2");
+    req.accept_count = 1;
+    req.perm = IDCELL_PERM_P1;
+    req.index = 0xFFFF;
+    idcell_type_list_add(req.accept_types, &req.accept_type_count, IDCELL_DTYPE_F64, 0);
+    idcell_type_list_add(req.accept_types, &req.accept_type_count, IDCELL_DTYPE_I32, 3);
+    req.want_ms = 20;
+    req.stale_ms = 500;
+    req.kind = IDCELL_KIND_STATE;
+    idcell_node_register_requirement(host, &req);
+
+    for (i = 0; i < 600 && !bound; i++) {
+        idcell_node_poll(dev, now);
+        idcell_node_poll(host, now);
+        now += 10;
+        if (idcell_node_peer_count(host) > 0) {
+            idcell_did_t p;
+            idcell_node_peer(host, 0, &p);
+            if (idcell_node_get_contract(host, &p, &ct) == IDCELL_OK) {
+                did = p;
+                bound = 1;
+            }
+        }
+    }
+    ok(bound, "前置：管道跑通并绑定");
+    if (!bound) {
+        printf("  （管道未通，跳过后续断言）\n");
+        idcell_node_free(dev); idcell_node_free(host); idcell_loopback_free(lb);
+        return;
+    }
+
+    ok(idcell_node_measure_clock_result(host, &did, &m) == IDCELL_E_NODEV,
+       "未发起测量时没有结果");
+
+    /* 设备计数轴故意领先 100 ms，用来验证 offset 与读数补偿 */
+    clk.base_ns = 100ULL * 1000ULL * 1000ULL;
+    clk.now_ms = &now;
+    clk.epoch = 7;
+    clk.quality = 2;
+    idcell_node_set_clock_source(dev, dev_clock, &clk);
+
+    ok(idcell_node_measure_clock(host, &did, now) == IDCELL_OK, "测量请求已发出");
+    ok(idcell_node_measure_clock_result(host, &did, &m) == 0,
+       "响应未到前结果为等待");
+
+    for (i = 0; i < 20 && ready != 1; i++) {
+        now += 10;
+        idcell_node_poll(dev, now);
+        now += 10;
+        idcell_node_poll(host, now);
+        ready = idcell_node_measure_clock_result(host, &did, &m);
+    }
+    ok_eq(ready, 1, "测量在有限轮内完成");
+    if (ready != 1) {
+        idcell_node_free(dev); idcell_node_free(host); idcell_loopback_free(lb);
+        return;
+    }
+
+    ok(m.tick_ns == 1000, "tick_ns 由设备声明，协议不默认 µs");
+    ok(m.epoch == 7, "epoch 随响应回传");
+    ok(m.quality == 2, "quality 随响应回传");
+    ok(m.counter > 0, "counter 是设备本地计数");
+    ok(m.rtt_ns >= 10000000ULL && m.rtt_ns <= 30000000ULL,
+       "RTT 由发起端单侧时钟量得（20 ms 量级）");
+    ok(m.offset_ns > 90000000LL && m.offset_ns < 110000000LL,
+       "offset ≈ 设备轴领先 100 ms");
+    ok(m.uncertainty_ns > 0 && m.uncertainty_ns <= 1000000u,
+       "测不准上界由 tick 与取样分辨率合成");
+
+    /* 读数补偿：同一 epoch 的新样本映射回发起端轴 */
+    {
+        idcell_clock_sample_t s2;
+        dev_clock(&clk, &s2);
+        mapped = idcell_clock_map_ns(&m, s2.counter);
+        expect = (int64_t)now * 1000000LL;
+        ok(mapped >= expect - 1000000LL && mapped <= expect + 1000000LL,
+           "读数补偿把设备计数映射回发起端轴");
+        ok(m.epoch == s2.epoch, "同一 epoch 才可比较（本组同 epoch）");
+    }
+
+    idcell_node_free(dev);
+    idcell_node_free(host);
+    idcell_loopback_free(lb);
+}
+
 /* ---------------------------------------------------------------- main */
 
 int main(void)
@@ -1512,6 +1665,7 @@ int main(void)
     test_no_match();
     test_qty_redline();
     test_period_redline();
+    test_time_sync();
 
     printf("\n========================================================================\n");
     printf(" 通过 %d 项，失败 %d 项\n", g_pass, g_fail);

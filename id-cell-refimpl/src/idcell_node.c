@@ -360,12 +360,24 @@ void idcell_node_set_value_source(idcell_node_t *n, idcell_value_fn fn, void *ud
     n->value_ud = ud;
 }
 
-/* v0.8：注册质量码来源（§24.5）。不注册则质量码恒为 GOOD。 */
+/* v0.12：注册质量码来源（§24.5）。不注册则质量码恒为 GOOD。 */
 void idcell_node_set_quality_source(idcell_node_t *n, idcell_quality_fn fn, void *ud)
 {
     if (!n) return;
     n->quality_fn = fn;
     n->quality_ud = ud;
+}
+
+/*
+ * v0.12：注册本地时钟源（§26.2）。
+ * 不注册时 0xFE00 服务点不存在，READ 返回 E_NODEV——时钟服务是可选能力，
+ * 不注册就不会凭空产生一个「假 µs 时钟」。
+ */
+void idcell_node_set_clock_source(idcell_node_t *n, idcell_clock_fn fn, void *ud)
+{
+    if (!n) return;
+    n->clock_fn = fn;
+    n->clock_ud = ud;
 }
 
 void idcell_node_set_data_sink(idcell_node_t *n, idcell_data_fn fn, void *ud)

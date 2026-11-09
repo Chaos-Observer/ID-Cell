@@ -130,6 +130,11 @@ typedef struct {
     idcell_did_t dev_did;
     idcell_did_t host_did;
     uint32_t     now;
+
+    /* v0.12：设备时钟源的模拟参数（§26） */
+    uint64_t     clock_base_ns;
+    uint16_t     clock_epoch;
+    uint8_t      clock_quality;
 } scene_t;
 
 /* 需求类型：加速度（只读，范围宽）或温度（读写，范围窄） */
@@ -141,6 +146,17 @@ static void scene_free(scene_t *sc)
     if (sc->host) idcell_node_free(sc->host);
     if (sc->lb)   idcell_loopback_free(sc->lb);
     memset(sc, 0, sizeof(*sc));
+}
+
+/* v0.12：设备本地计数源。counter 单位 = tick_ns = 1 µs。 */
+static int wire_dev_clock(void *ud, idcell_clock_sample_t *out)
+{
+    scene_t *sc = (scene_t *)ud;
+    out->counter = sc->clock_base_ns / 1000ULL + (uint64_t)sc->now * 1000ULL;
+    out->tick_ns = 1000;
+    out->epoch = sc->clock_epoch;
+    out->quality = sc->clock_quality;
+    return IDCELL_OK;
 }
 
 /*
@@ -661,6 +677,134 @@ static void test_wire_async_write(void)
     scene_free(&sc);
 }
 
+/*
+ * 12.7 v0.12 · §26：单跳时延测绘只使用既有 READ/READ 响应。
+ *
+ * 这一组是「内生」的字节层证据：没有新增帧类型、没有 SYNC 帧、
+ * 没有改写 SRC/DST、没有把设备 TS 拉齐到发起端轴。补偿只发生在
+ * 消费侧（读数补偿），线上两端各自保留自己的本地时刻。
+ */
+static void test_wire_clock(void)
+{
+    scene_t sc;
+    idcell_clock_measure_t m;
+    idwp_frame_t f, req_f, resp_f;
+    uint8_t req_pay[256], resp_pay[256];
+    uint16_t req_len = 0, resp_len = 0;
+    unsigned ca[256] = { 0 }, cb[256] = { 0 };
+    idwp_tlv_t ct, vt;
+    uint64_t counter, mapped;
+    uint32_t tick_ns, t0;
+    uint16_t epoch;
+    uint8_t quality;
+    int i, ready = 0, have_req = 0, have_resp = 0, bad_type = 0;
+
+    group("12.7 黑盒·时钟测量只走既有 READ（§26）");
+
+    if (!scene_setup(&sc, REQ_ACCEL)) {
+        ok(0, "前置：管道跑通");
+        scene_free(&sc);
+        return;
+    }
+    ok(1, "前置：管道跑通");
+
+    sc.clock_base_ns = 50ULL * 1000ULL * 1000ULL;
+    sc.clock_epoch = 3;
+    sc.clock_quality = 2;
+    idcell_node_set_clock_source(sc.dev, wire_dev_clock, &sc);
+
+    t0 = sc.now;
+    ok(idcell_node_measure_clock(sc.host, &sc.dev_did, t0) == IDCELL_OK,
+       "测量请求以 READ 发出");
+
+    for (i = 0; i < 20 && ready != 1; i++) {
+        sc.now += 10;
+        idcell_node_poll(sc.dev, sc.now);
+        sc.now += 10;
+        idcell_node_poll(sc.host, sc.now);
+        ready = idcell_node_measure_clock_result(sc.host, &sc.dev_did, &m);
+    }
+    ok_eq(ready, 1, "测量在有限轮内完成");
+
+    memset(req_pay, 0, sizeof(req_pay));
+    memset(resp_pay, 0, sizeof(resp_pay));
+
+    /* 主机 TX：统计类型并留取第一帧 READ */
+    while (idwp_stream_next(&sc.link_b.tx, &f)) {
+        cb[f.type]++;
+        if (f.type > 0x18) bad_type = 1;
+        if (f.type == IDWP_T_READ && !have_req) {
+            req_f = f;
+            req_len = f.payload_len;
+            memcpy(req_pay, f.payload, req_len);
+            have_req = 1;
+        }
+    }
+    /* 设备 TX：统计类型并留取第一帧 READ 响应 */
+    while (idwp_stream_next(&sc.link_a.tx, &f)) {
+        ca[f.type]++;
+        if (f.type > 0x18) bad_type = 1;
+        if (f.type == IDWP_T_READ && !have_resp) {
+            resp_f = f;
+            resp_len = f.payload_len;
+            memcpy(resp_pay, f.payload, resp_len);
+            have_resp = 1;
+        }
+    }
+
+    ok(have_req && cb[IDWP_T_READ] == 1, "主机 TX 恰好一帧 READ");
+    ok(have_resp && ca[IDWP_T_READ] == 1, "设备 TX 恰好一帧 READ 响应");
+    ok(!bad_type, "线上未出现既有类型表之外的帧类型（无新帧类型）");
+    ok(req_f.crc_ok && resp_f.crc_ok, "请求与响应 CRC 均独立核对通过");
+
+    ok(memcmp(req_f.src, sc.host_did.b, 8) == 0 &&
+       memcmp(req_f.dst, sc.dev_did.b, 8) == 0,
+       "请求 SRC/DST 仍是端到端身份");
+    ok(memcmp(resp_f.src, sc.dev_did.b, 8) == 0 &&
+       memcmp(resp_f.dst, sc.host_did.b, 8) == 0,
+       "响应 SRC/DST 未被任何中间层改写");
+    ok(req_f.txn == resp_f.txn, "请求与响应是同一事务号");
+
+    ok(req_f.ts_us == (uint64_t)t0 * 1000ULL, "请求 TS 是发起端本地时刻");
+    ok(resp_f.ts_us > req_f.ts_us &&
+       resp_f.ts_us - req_f.ts_us <= 50000ULL,
+       "响应 TS 是设备本地时刻，未被拉齐到发起端轴");
+
+    ok(idwp_payload_find_tlv(req_pay, req_len, IDWP_TLV_VALUE, &vt) &&
+       vt.idx == IDCELL_SVC_CLOCK_INDEX,
+       "请求读的是 0xFE00 保留服务点");
+    ok(!idwp_payload_find_tlv(req_pay, req_len, IDWP_TLV_CLOCK, NULL),
+       "请求不携带 CLOCK 回传");
+    ok(idwp_payload_find_tlv(resp_pay, resp_len, IDWP_TLV_CLOCK, &ct) &&
+       ct.len == 15,
+       "响应携带 15 字节 CLOCK 记录");
+    ok(!idwp_payload_find_tlv(resp_pay, resp_len, IDWP_TLV_VALUE, NULL),
+       "服务响应不是能力点读数（无 VALUE TLV）");
+
+    counter  = idwp_get_u64(ct.val);
+    tick_ns  = idwp_get_u32(ct.val + 8);
+    epoch    = idwp_get_u16(ct.val + 12);
+    quality  = ct.val[14];
+    ok(tick_ns == 1000, "tick_ns 由设备声明（1 µs）");
+    ok(epoch == 3, "epoch 原样回传");
+    ok(quality == 2, "quality 原样回传");
+    ok(counter == sc.clock_base_ns / 1000ULL + resp_f.ts_us,
+       "counter 与设备本地时刻同源，不是被改写过的全局时间");
+
+    ok(m.rtt_ns == 20000000ULL, "RTT 由发起端单侧时钟量得（20 ms）");
+    ok(m.offset_ns > 49000000LL && m.offset_ns < 51000000LL,
+       "offset ≈ 设备轴领先 50 ms");
+    ok(m.epoch == 3 && m.tick_ns == 1000 && m.quality == 2,
+       "测量结果保留设备的计数域声明");
+
+    mapped = (uint64_t)idcell_clock_map_ns(&m, counter);
+    ok(mapped >= resp_f.ts_us * 1000ULL - 1000000ULL &&
+       mapped <= resp_f.ts_us * 1000ULL + 1000000ULL,
+       "读数补偿把设备计数映射回发起端轴");
+
+    scene_free(&sc);
+}
+
 /* ---------------------------------------------------------------- main */
 
 int main(void)
@@ -677,6 +821,7 @@ int main(void)
     test_wire_header();
     test_wire_error_body();
     test_wire_async_write();
+    test_wire_clock();
 
     printf("\n========================================================================\n");
     printf(" 通过 %d 项，失败 %d 项\n", g_pass, g_fail);
