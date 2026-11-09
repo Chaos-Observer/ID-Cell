@@ -2081,7 +2081,7 @@ flowchart LR
 <thead><tr><th style="width:20%">字段</th><th style="width:12%">类型</th><th style="width:68%">语义</th></tr></thead>
 <tbody>
 <tr><td><code>index</code> / <code>sub</code></td><td>u16 / u8</td><td>帧内引用。index 指向能力点，sub 用于同一能力点的分量（多轴量的第几轴等）</td></tr>
-<tr><td><code>label</code></td><td>string</td><td>人类可读名称，直接用于生成说明书</td></tr>
+<tr><td><code>label</code></td><td>string</td><td>人类可读名称，直接用于生成说明书；MUST NOT 用作订阅键、匹配键或任何线格式的稳定引用</td></tr>
 <tr><td><code>kind</code></td><td>enum</td><td>state / event / command。决定该点能否出现在写帧中、用哪种保持语义</td></tr>
 <tr><td><code>dir</code></td><td>enum</td><td>r / w / rw</td></tr>
 <tr><td><code>perm</code></td><td>enum</td><td>所需权限等级，见 04.3</td></tr>
@@ -2195,7 +2195,7 @@ flowchart LR
 <tr><td><code>AUTH</code> ★</td><td>鉴权 / 权限校对</td><td>挑战-响应；响应携带所申请权限等级与授予结果</td></tr>
 <tr><td><code>BIND</code></td><td>绑定契约准备、提交与激活</td><td>写入 binding_id、cap_list、逐点 schema、仲裁域、TTL、session_id 与 grant_epoch；仅提交确认后进入 active，半激活状态不可用于业务</td></tr>
 <tr><td><code>READ</code> / <code>WRITE</code> ★</td><td>读写能力点</td><td>按契约 schema 解析，必要时携带 schema_ref；写操作必须携带 owner_token、grant_epoch、意图与有限有效期</td></tr>
-<tr><td><code>SUBSCRIBE</code> / <code>UNSUB</code> ★</td><td>发布订阅</td><td>按 index 或按标签前缀订阅；带发布周期与 QoS 提示</td></tr>
+<tr><td><code>SUBSCRIBE</code> / <code>UNSUB</code> ★</td><td>发布订阅</td><td>按 <code>(index, sub)</code> 二元组订阅；批量订阅 MUST 使用 <code>(index_start, index_end, sub)</code> 区间或规范保留的 <code>group_id</code>。<code>label</code> 是人类可读名称，MUST NOT 作为订阅键或匹配键。订阅键在绑定存续期内 MUST 不可变，变更只经 <code>RENEGOTIATE</code> 或本帧增量生效；带发布周期与 QoS 提示</td></tr>
 <tr><td><code>EVENT</code> ★</td><td>事件上报</td><td>edge 轨语义，带 (source_id, seq)、原会话/授权纪元；补发必须有 history 标志且不得进入实时控制路径</td></tr>
 <tr><td><code>CMD</code> / <code>ACK</code> / <code>DONE</code></td><td>命令执行流（三段语义）</td><td><code>CMD</code> 下发命令并要求确认 → <code>ACK</code> 确认已受理（可能尚未执行）→ <code>DONE</code> 报告执行完成与结果。三段分开是必须的：受理与完成是两件事，混成一个响应会让上层无法区分「没收到」与「执行失败」</td></tr>
 <tr><td><code>LEASE</code> ★</td><td>租约申请 / 续租 / 释放</td><td>仲裁域、owner_token、TTL、仲裁优先级、authority_id/authority_epoch、member_epoch、grant_epoch 与 fencing；旧纪元写必须失效</td></tr>
@@ -4170,7 +4170,7 @@ flowchart TB
 <tr><td><b>MQTT</b></td><td>Last Will and Testament <span class="tag tag-opt">参考</span></td><td>遗嘱在 CONNECT 包中预先登记；连接非正常关闭时，由 Server 代为发布遗嘱消息。</td><td>§09.4 OFFLINE 帧（设备主动宣告即将离线）与 §08.10 降级由消费侧按 fail_action 执行——MQTT 的 WLT 证明「对端无法发声明」是常态。</td><td>WLT 的代发者是 Broker，而 ID-CELL 没有 Broker（§13 不做中心化协调者）。OFFLINE 只能由设备主动发；WLT 的价值在于反向提醒——消费侧必须能在没收到任何声明时自行按失效行为回落。</td></tr>
 
 <tr><td rowspan="3"><b>CoAP</b></td><td>RFC 6690 <code>/.well-known/core</code> 资源自描述 <span class="tag tag-opt">参考</span></td><td>资源根路径下放一份机器可读的能力清单，客户端 GET 一次即知有哪些资源、每个资源的属性。</td><td>§08.9 披露分级与 §09.2 描述符可达性：把描述符的自描述入口固定为一个约定位置，使「先描述后匹配」不需要新帧类型。</td><td>CoAP 建立在 URL 之上，ID-CELL 是裸帧协议没有 URL 体系。只能把它映射成「固定的一个 HELLO 帧」这一约定，而不是路径层级。</td></tr>
-<tr><td>RFC 7641 Observe <span class="tag tag-must">采纳</span></td><td>客户端对某资源注册观察，服务端在资源变化时推送通知；注册本身带过期时间。</td><td>§09.4 SUBSCRIBE / UNSUB 与 §08.6 的 edge 轨：订阅 + 变化推送的结构与 ID-CELL 一致。</td><td>Observe 订阅的是单个状态查询，ID-CELL 订阅的是能力点集合（可按 index 或按标签前缀订阅），粒度不同。Observe 的注册过期语义值得借：订阅必须有明确的失效与重订规则。</td></tr>
+<tr><td>RFC 7641 Observe <span class="tag tag-must">采纳</span></td><td>客户端对某资源注册观察，服务端在资源变化时推送通知；注册本身带过期时间。</td><td>§09.4 SUBSCRIBE / UNSUB 与 §08.6 的 edge 轨：订阅 + 变化推送的结构与 ID-CELL 一致。</td><td>Observe 订阅的是单个状态查询，ID-CELL 订阅的是能力点集合（按 <code>(index, sub)</code> 二元组、区间或 <code>group_id</code> 订阅），粒度不同。Observe 的注册过期语义值得借：订阅必须有明确的失效与重订规则。</td></tr>
 <tr><td>RFC 7959 / 9177 Block-Wise <span class="tag tag-opt">参考</span></td><td>大载荷按块传输，每块带序号，支持只重传缺失块，接收端组装。</td><td>§09.1 PAYLOAD 可变长与 §05.2 FR-008（描述符超单帧容量时必须分片传输并带分片序号与总片数）。</td><td>ID-CELL v1 的分片是描述符级、一次性、无断点续传；Block-Wise 是块级且支持续传，对 TCP 类链路更优。但 §10 已明确协议不假设链路可靠有序，v1 不引入块级重传语义。</td></tr>
 
 <tr><td><b>OPC UA</b></td><td>Part 12 Discovery：LDS / LDS-ME / GDS <span class="tag tag-opt">参考</span></td><td>三层发现：主机级本地发现服务（LDS）、组播发现（LDS-ME）、全局发现服务器（GDS）。Server 调 RegisterServer / RegisterServer2，Client 调 FindServers / GetEndpoints。</td><td>§02.1 注册表角色与 §08.1 DISCOVER 的链路广播；§11.3 一致性测试套件中的「发现端点」用例语义。</td><td>GDS 是中心化全局目录，与 §13「不设中心化协调者」冲突，只能借 LDS 层的「本地目录」语义。且 OPC UA Part 12 只解决「找到端点并拿到 EndpointDescription」，语义匹配仍留给应用层——与 ID-CELL 把匹配做进协议的做法不同。</td></tr>
