@@ -2055,7 +2055,7 @@ flowchart LR
 <tr><td><code>VER</code></td><td>1B</td><td>协议版本</td><td>主.次</td><td>不兼容变更升主版本</td></tr>
 <tr><td><code>PROF</code></td><td>1B</td><td>模式：RT / STD</td><td>枚举</td><td>模式在链路建立时协商</td></tr>
 <tr><td><code>FLAGS</code></td><td>1B</td><td>标志位：加密 / 压缩 / 分片 / 需确认 / 抢占</td><td>位域</td><td>未定义位必须忽略</td></tr>
-<tr><td><code>TYPE</code></td><td>1B</td><td>帧类型</td><td>见 04.4</td><td>未知类型按 ERROR 处理</td></tr>
+<tr><td><code>TYPE</code></td><td>1B</td><td>帧类型</td><td>见 04.4</td><td>未知类型静默丢弃并计数，MUST NOT 中断会话</td></tr>
 <tr><td><code>SEQ</code></td><td>2B</td><td>帧序号（每方向独立）</td><td>回绕</td><td>幂等去重与丢包判定</td></tr>
 <tr><td><code>TXN</code></td><td>2B</td><td>事务号，关联请求与响应</td><td>回绕</td><td>0 表示非事务帧</td></tr>
 <tr><td><code>LEN</code></td><td>2B</td><td>payload 的精确字节数，不含 AUTH_TAG/CRC/TRAILER</td><td>≤ 绑定最大载荷</td><td>接收方在分配或复制前校验</td></tr>
@@ -4194,7 +4194,7 @@ flowchart TB
 
 <tr><td rowspan="3"><b>IOCTL</b></td><td>read/write 与 ioctl 的语义分离 <span class="tag tag-must">采纳</span></td><td>read/write 传数据流，ioctl 传控制操作；两者是不同的调用通道，控制意图不走数据通道。</td><td>§09.4 帧类型划分：控制面帧（MATCH / NEGOTIATE / BIND / LEASE / PROVISION / CONFIG）与数据面帧（READ / WRITE / PUBLISH）必须在 TYPE 上分开，不能靠同一帧类型加标志位区分。</td><td>ID-CELL 已有 TYPE 字段，划分本身零成本；但要小心 §09.1 FLAGS 里的「抢占」位——它让 PREEMPT 看起来像数据帧上的一个标志，边界要写清。</td></tr>
 <tr><td>禁止在数据流里塞特殊字符当控制命令 <span class="tag tag-opt">参考</span></td><td>把控制命令编码成数据流中的特殊字符值，被明确视为错误做法。</td><td>§08.6 level / edge 双轨与 §09.4 帧清单：控制语义不得靠特殊值编码隐含在数据帧里。</td><td>这条支持 ID-CELL 现有的分型做法（收益是错误诊断清晰），代价是帧类型枚举会变长，而 §09.1 的 TYPE 只有 1 字节——号段必须预留（见下一行）。</td></tr>
-<tr><td>命令编码宏 _IO / _IOR / _IOW / _IORW（方向位 + 类型 + 序号 + size）；内核文档提醒命令定义极易写错且事后难以在不破坏既有应用的前提下修复 <span class="tag tag-opt">参考</span></td><td>命令号由方向位、类型号、序号、size 拼成；内核文档原文提醒这极容易写错，且事后修会破坏既有应用。</td><td>§09.1 TYPE 枚举值与 §09.6 错误码集一旦发布即不可更改（§01 四件冻结物）；同时支撑 §09.4「未知类型按 ERROR 处理，不中断连接」。</td><td>这解释了为什么 §09.1 的 TYPE 号段必须在冻结前一次定死，并显式预留空洞。未知类型必须可被识别为「未知」而不是被误解为某个合法类型。</td></tr>
+<tr><td>命令编码宏 _IO / _IOR / _IOW / _IORW（方向位 + 类型 + 序号 + size）；内核文档提醒命令定义极易写错且事后难以在不破坏既有应用的前提下修复 <span class="tag tag-opt">参考</span></td><td>命令号由方向位、类型号、序号、size 拼成；内核文档原文提醒这极容易写错，且事后修会破坏既有应用。</td><td>§09.1 TYPE 枚举值与 §09.6 错误码集一旦发布即不可更改（§01 四件冻结物）；同时支撑 §09.4「未知类型静默丢弃并计入 <code>unknown_type_dropped</code>，不中断连接」。</td><td>这解释了为什么 §09.1 的 TYPE 号段必须在冻结前一次定死，并显式预留空洞。未知类型必须可被识别为「未知」而不是被误解为某个合法类型。</td></tr>
 
 <tr><td rowspan="3"><b>RPC / protobuf</b></td><td>contract 必需 vs contract 可选 <span class="tag tag-opt">参考</span></td><td>gRPC 的 contract 必需（.proto），OpenAPI 的 contract 可选（可以只给说明不给机器可读 schema）。</td><td>§01 的 D3「能力自描述」与 §08.3「能力描述符必须是一等公民」：ID-CELL 选的是 contract 必需一侧——描述符缺失或字段不全，设备即不可用，与功能多强无关。</td><td>contract 必需意味着每个实现方必须产出机器可读描述符，抬高最小实现门槛。TC-A 基线上 4 个能力点、描述符 2 KB 是这条门槛的具体预算。</td></tr>
 <tr><td>schema 先行与运行时自描述直接对立 <span class="tag tag-opt">参考</span></td><td>schema 先行的体系要求双方预先持有同一份编译产物才能通信；运行时自描述则要求契约随会话传输。</td><td>§08.1 的 DISCOVER / DESCRIBE 两段本身就是「运行时把契约送到对端」；这是 ID-CELL 与 gRPC / OpenAPI 路线最根本的分野。</td><td>运行时自描述的代价是每次首次接入多一轮传输与一次 RTT。收益是新设备无需预置任何配置即可被理解——这正是 D2 的全部内容。</td></tr>
@@ -4510,7 +4510,7 @@ flowchart TB
 <tr><td>MCU 只有几百 KB 内存</td><td>协议栈本身要占多少？握手期峰值多少？</td><td>协议栈常驻 RAM ≤ 16 KB（不含应用）；六段管道全流程峰值 ≤ 48 KB，其中描述符分片重组缓冲 ≤ 8 KB；MCU 侧 Flash ≤ 48 KB（含单位精简子集与转换表，转换表不得推到运行时下载）</td><td><span class="tag tag-must">A</span></td></tr>
 <tr><td>三四十个能力点，描述符偏大</td><td>描述符常驻内存放得下吗？解析开销有界吗？</td><td>单设备描述符缓存 ≤ 8 KB，同时缓存的对端描述符 ≤ 8 份，超出淘汰最久未用项；ATE 解析峰值 ≤ 16 KB、嵌套深度 ≤ 8、单行 ≤ 1 KB；描述符条目数与分片数 MUST 有上限，超限返回结构化错误而非截断后继续</td><td><span class="tag tag-must">A</span></td></tr>
 <tr><td>几乎全部只读，无可写点</td><td>只读设备需不需要仲裁、租约、抢占这些重机制？</td><td>不需要。CL-1 数据点级只承诺发现、描述符读取、请求响应式读写、周期发布、心跳与租约、结构化错误码；匹配与协商、仲裁与抢占、事件上报、命令执行均可不支持——<strong>低档实现依然完全合规</strong></td><td><span class="tag tag-must">A</span></td></tr>
-<tr><td>实现细节不一致、版本号不同</td><td>遇到不认识的字段和不认识的版本怎么办？</td><td>未知 TLV MUST 跳过并继续处理后续 TLV，MUST NOT 因此丢弃整帧；未知帧类型按 ERROR 处理但 MUST NOT 中断连接；VER 主版本不同返回 E_VER 并附支持版本区间，次版本不同接受但双方功能集取交集</td><td><span class="tag tag-must">A</span></td></tr>
+<tr><td>实现细节不一致、版本号不同</td><td>遇到不认识的字段和不认识的版本怎么办？</td><td>未知普通（非 critical）TLV MUST 跳过并继续处理后续 TLV，MUST NOT 因此丢弃整帧；critical=1 的未知 TLV MUST 以 <code>E_UNSAFE</code> 拒绝整帧；未知帧类型 MUST 静默丢弃并递增 <code>unknown_type_dropped</code> 计数，MUST NOT 回 ERROR、MUST NOT 中断连接；VER 主版本不同返回 E_VER 并附支持版本区间，次版本不同接受但双方功能集取交集</td><td><span class="tag tag-must">A</span></td></tr>
 <tr><td>无固定可依赖的地址、不愿维护白名单</td><td>在没有任何预置信息的前提下，怎么发现并识别一台设备？</td><td>周期广播存在声明，载荷至少含本地 DID、设备类型、厂商标识、能力类目摘要与协议版本号；未鉴权对端可见信息 MUST 限于 L0 广播级摘要，可写点与标定曲线等属 L1/L2，MUST 在完成配对鉴权后才可见</td><td><span class="tag tag-must">A</span></td></tr>
 <tr><td>CL-1 档不支持 MATCH 与 NEGOTIATE</td><td>档位不支持匹配时，「主机端零设备专用代码」还算不算数？</td><td>该档下主机端无法靠需求描述自动命中，只能自行读取描述符后指名绑定；<strong>「零配置接入」这一判据在 CL-1 档下不成立，需要一句明确的范围说明</strong>——是设计决定还是实现缺陷，必须写清楚</td><td><span class="tag tag-defer">B</span></td></tr>
 </tbody>
