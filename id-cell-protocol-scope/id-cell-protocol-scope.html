@@ -628,7 +628,7 @@ flowchart TB
 <tbody>
 <tr><td><code>FR-039</code></td><td>命令执行 MUST 实现 <code>CMD</code> → <code>ACK</code> → <code>DONE</code> 三段语义：<code>ACK</code> 表示已受理，<code>DONE</code> 表示执行完成；执行失败 MUST 在 <code>DONE</code> 中给出原因，MUST NOT 以缺失 <code>DONE</code> 代替。</td><td><span class="tag tag-must">MUST</span></td><td>下发一条耗时约 500 ms 的命令，观察到 <code>ACK</code> 先于 <code>DONE</code> 到达且时间差与执行耗时相符；令执行失败，<code>DONE</code> MUST 携带失败原因。</td><td>§09.4</td></tr>
 <tr><td><code>FR-040</code></td><td>协议 MUST 支持 level 与 edge 两类轨道，但不要求每个能力点同时支持两者：state 点 MUST 提供可读取的当前状态，event 点 MUST 提供带去重键的事件；仅声明 trigger=both 的点才同时提供两者。事件轨 MUST NOT 替代状态点的当前值。</td><td><span class="tag tag-must">MUST</span></td><td>中途接入者读取 state 点必须得到当前值；event 点只需提供事件轨；trigger=both 点才检查双轨；只有事件而无法读取状态的 state 点判不合规。</td><td>§08.6</td></tr>
-<tr><td><code>FR-041</code></td><td><code>EVENT</code> 帧 MUST 仅用于表达状态迁移与告警，MUST NOT 用于承载全量状态；全量状态 MUST 走 level 轨。事件 MUST 携带 <code>(source_id, seq)</code> 幂等键且 <code>seq</code> 在同一来源内单调递增。</td><td><span class="tag tag-must">MUST</span></td><td>抓取全部 <code>EVENT</code> 帧，MUST 含 <code>source_id</code> 与 <code>seq</code> 两字段且 <code>seq</code> 严格递增；构造一个承载全量状态的 <code>EVENT</code> MUST 被判为不合规。</td><td>§09.4、§08.7</td></tr>
+<tr><td><code>FR-041</code></td><td><code>EVENT</code> 帧 MUST 仅用于表达状态迁移与告警，MUST NOT 用于承载全量状态。全量状态 MUST 经 <code>READ</code> 响应提供：level 轨的「周期发布」定义为消费方按契约 <code>T_pub</code> 周期发起 <code>READ</code>，提供方 MUST 保证任意 <code>T_pub</code> 窗口内至少可读一次当前值；提供方 MUST NOT 通过 <code>EVENT</code> 重复发送未变化的值。事件 MUST 携带 <code>(source_id, seq)</code> 幂等键且 <code>seq</code> 在同一来源内单调递增。</td><td><span class="tag tag-must">MUST</span></td><td>抓取全部 <code>EVENT</code> 帧，MUST 含 <code>source_id</code> 与 <code>seq</code> 两字段且 <code>seq</code> 严格递增；构造一个承载全量状态的 <code>EVENT</code> MUST 被判为不合规；同一状态在连续 3 个 <code>T_pub</code> 窗口内未变化时，MUST 不存在第二个承载该状态的 <code>EVENT</code>。</td><td>§09.4、§08.7</td></tr>
 <tr><td><code>FR-042</code></td><td>提供方 SHOULD 在来源降级（如 <code>measured</code> → <code>sampled</code>）时主动发送 <code>STALE</code> 帧；消费方收到后 MUST 立即降低该点的信任权重。</td><td><span class="tag tag-opt">SHOULD</span></td><td>令提供方切换到抽样模式，抓包 SHOULD 观察到 <code>STALE</code> 帧；消费方在该帧到达后一个 <code>T_pub</code> 内 MUST 已降低该点的置信权重。</td><td>§09.4、§08.5</td></tr>
 </tbody>
 </table>
@@ -1842,7 +1842,7 @@ flowchart TB
 <p>这条是本节唯一要落地的口径，五个要素缺一不可：</p>
 <ol>
 <li><strong>单写者租约（所有权）。</strong>每个可写能力点有且只有一个 owner，owner 持有带 TTL 的租约，所有写操作必须携带 owner token；<strong>租约到期即释放所有权</strong>并执行该点声明的失效行为。没有租约就没有单写者，没有单写者就必然自锁。这一条是<strong>根因修复</strong>。</li>
-<li><strong>level 轨：状态可读、期望可自校正。</strong>状态型写操作传的是「期望值」而非「边沿」，设备按声明的同步周期自行校正实际输出。即使某次写命令在链路上丢失，输出仍会被拉回期望值，而不是停在旧值上。</li>
+<li><strong>level 轨：状态可读、期望可自校正。</strong>状态型写操作传的是「期望值」而非「边沿」，设备按声明的同步周期自行校正实际输出。即使某次写命令在链路上丢失，输出仍会被拉回期望值，而不是停在旧值上。读取侧 MUST 由 <code>READ</code> 响应承载；协议不定义独立的 level 推送帧，「周期发布」即消费方按 <code>T_pub</code> 周期发起 <code>READ</code>。</li>
 <li><strong>edge 轨：变化可感知、流量可省。</strong>事件型量仍走边沿，状态变化以事件帧单独通知，避免每次轮询都传全量。edge 轨<strong>只做通知，不承担保持职责</strong>。</li>
 <li><strong>两轨不可互相替代。</strong>只有 edge → 丢状态，中途接入者无法得知当前值，且丢失的那次写入永远无法恢复；只有 level → 每次变化都要传全量，且无法区分「没变」与「没收到」。level 是<strong>正确性来源</strong>，edge 是<strong>效率来源</strong>。</li>
 <li><strong>失效行为显式声明、逐点生效。</strong>「断链后设备怎么表现」是物理安全语义，必须由设备在能力描述符里逐点声明，协议只负责保证「链路断开时按声明执行」。</li>
