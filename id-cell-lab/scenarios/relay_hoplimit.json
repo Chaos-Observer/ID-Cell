@@ -1,0 +1,46 @@
+{
+  "name": "中继跳数限制：HOP_LIMIT 耗尽不转发",
+  "duration_ms": 3000,
+  "seed": 13,
+  "key": "idcell-lab-key",
+  "require_link": true,
+  "max_hops": 6,
+  "link": { "media": "ethernet", "delay_ms": 4 },
+  "devices": [
+    {
+      "name": "field-app",
+      "did": "00000000-00000031",
+      "mode": "consumer"
+    },
+    {
+      "name": "gw-01",
+      "did": "00000000-00000032",
+      "mode": "consumer",
+      "relay": true
+    },
+    {
+      "name": "remote-sensor",
+      "did": "00000000-00000033",
+      "mode": "provider",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "远端压力", "qty": "pressure", "unit": "kPa", "dtype": "f64" }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 260.0, "amplitude": 4.0, "period_ms": 3000 }
+      ]
+    }
+  ],
+  "links": [
+    { "a": "field-app", "b": "gw-01", "media": "ethernet" },
+    { "a": "gw-01", "b": "remote-sensor", "media": "ethernet" }
+  ],
+  "faults": [
+    { "at_ms": 600, "kind": "query", "device": "field-app", "selector": "*", "mode": "all", "hop_limit": 1 }
+  ],
+  "asserts": [
+    { "kind": "queries_sent", "op": ">=", "value": 1, "description": "现场端确实发了查询" },
+    { "kind": "frame", "frame": "QUERY", "op": ">=", "value": 1, "description": "QUERY 到达直连网关" },
+    { "kind": "replies_rx", "op": "==", "value": 0, "tolerance": 0.0, "description": "跳数不足，远端应答无法产生" },
+    { "kind": "query_timeouts", "op": ">=", "value": 1, "description": "查询按超时结束" }
+  ]
+}

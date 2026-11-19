@@ -1,0 +1,52 @@
+{
+  "name": "多提供者查询：一次 QUERY 聚合所有应答",
+  "duration_ms": 3000,
+  "seed": 42,
+  "key": "idcell-lab-key",
+  "link": { "media": "loopback", "delay_ms": 1 },
+  "devices": [
+    {
+      "name": "plc-01",
+      "did": "00000000-00000001",
+      "mode": "provider",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "进水温度", "qty": "temperature", "unit": "C", "dtype": "f64" },
+        { "index": 2, "sub": 0, "label": "回水温度", "qty": "temperature", "unit": "C", "dtype": "f64" }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 18.0, "amplitude": 1.0, "period_ms": 2000 },
+        { "index": 2, "sub": 0, "base": 24.0, "amplitude": 1.0, "period_ms": 2000 }
+      ]
+    },
+    {
+      "name": "plc-02",
+      "did": "00000000-00000002",
+      "mode": "provider",
+      "caps": [
+        { "index": 3, "sub": 0, "label": "系统压力", "qty": "pressure", "unit": "kPa", "dtype": "f64" },
+        { "index": 4, "sub": 0, "label": "瞬时流量", "qty": "ratio", "unit": "m3/h", "dtype": "f64" }
+      ],
+      "values": [
+        { "index": 3, "sub": 0, "base": 320.0, "amplitude": 5.0, "period_ms": 3000 },
+        { "index": 4, "sub": 0, "base": 42.0, "amplitude": 3.0, "period_ms": 3000 }
+      ]
+    },
+    {
+      "name": "scada",
+      "did": "00000000-00000003",
+      "mode": "consumer"
+    }
+  ],
+  "faults": [
+    { "at_ms": 800, "kind": "query", "device": "scada", "selector": "*", "mode": "all" }
+  ],
+  "asserts": [
+    { "kind": "queries_sent", "op": ">=", "value": 1, "description": "SCADA 发起了一次查询" },
+    { "kind": "replies_rx", "op": ">=", "value": 4, "description": "聚合到两个提供者的 4 个点" },
+    { "kind": "queries_answered", "op": ">=", "value": 2, "description": "两个提供者都做了应答" },
+    { "kind": "query_replies", "device": "scada", "op": ">=", "value": 4, "description": "SCADA 会话内累计 4 条应答" },
+    { "kind": "frame", "frame": "QUERY", "op": ">=", "value": 1, "description": "QUERY 帧已发出" },
+    { "kind": "frame", "frame": "REPLY", "op": ">=", "value": 4, "description": "至少 4 条 REPLY 帧" },
+    { "kind": "frame", "frame": "REPLY_END", "op": ">=", "value": 2, "description": "每个提供者都发了 REPLY_END" }
+  ]
+}

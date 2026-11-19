@@ -1,0 +1,10 @@
+[package]
+name = "idcell-lab"
+version.workspace = true
+edition.workspace = true
+description = "ID-CELL 仿真平台命令行与 Web 实时面板"
+
+[dependencies]
+idcell-core = { path = "../idcell-core" }
+idcell-engine = { path = "../idcell-engine" }
+idcell-scenario = { path = "../idcell-scenario" }

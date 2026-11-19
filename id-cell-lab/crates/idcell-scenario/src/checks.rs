@@ -1,0 +1,195 @@
+//! 场景断言评估。
+//!
+//! 断言在仿真结束后对最终状态求值，避免依赖中间瞬时状态。
+//! 支持的 kind：
+//!   stage        —— device 对 peer 的会话阶段（含 pipeline_done 别名）
+//!   role         —— device 对 peer 的会话角色
+//!   bound        —— binds_ok 至少一次（value 可指定最少次数）
+//!   binds_ok / binds_fail / stale_events / timeouts /
+//!   writes_ok / writes_rejected / events_rx —— 全局计数器阈值
+//!   queries_sent / replies_rx / queries_answered / query_timeouts —— 查询计数器
+//!   query_replies —— 指定 device 聚合到的应答条数（device 字段）
+//!   value        —— device 收到的点值（index/sub），带容差
+//!   frame        —— 帧类型计数，frame 字段为类型名（如 EVENT）
+
+use crate::model::AssertDef;
+use idcell_engine::{json_escape, Stage, World};
+
+#[derive(Debug, Clone)]
+pub struct AssertResult {
+    pub description: String,
+    pub kind: String,
+    pub passed: bool,
+    pub detail: String,
+}
+
+impl AssertResult {
+    pub fn to_json(&self) -> String {
+        format!(
+            "{{\"kind\":\"{}\",\"description\":\"{}\",\"passed\":{},\"detail\":\"{}\"}}",
+            json_escape(&self.kind),
+            json_escape(&self.description),
+            self.passed,
+            json_escape(&self.detail)
+        )
+    }
+}
+
+fn compare(op: &str, actual: f64, expected: f64, tolerance: f64) -> bool {
+    match op {
+        ">" => actual > expected,
+        ">=" => actual >= expected,
+        "<" => actual < expected,
+        "<=" => actual <= expected,
+        "==" | "=" => (actual - expected).abs() <= tolerance.max(f64::EPSILON),
+        "!=" => (actual - expected).abs() > tolerance.max(f64::EPSILON),
+        _ => false,
+    }
+}
+
+fn counter(world: &World, kind: &str) -> Option<u64> {
+    let m = &world.metrics;
+    Some(match kind {
+        "binds_ok" => world.total_binds_ok(),
+        "binds_fail" => world.total_binds_fail(),
+        "stale_events" => world.total_stale_events(),
+        "timeouts" => world.total_timeouts(),
+        "writes_ok" => world.total_writes_ok(),
+        "writes_rejected" => world.total_writes_rejected(),
+        "events_rx" => world.total_events_rx(),
+        "queries_sent" => world.total_queries_sent(),
+        "replies_rx" => world.total_replies_rx(),
+        "queries_answered" => world.total_queries_answered(),
+        "query_timeouts" => world.total_query_timeouts(),
+        "logic" => world.total_logic_fired(),
+        "proto_rejects" => world.total_proto_rejects(),
+        "frames_tx" => m.frames_tx,
+        "frames_rx" => m.frames_rx,
+        "drops" => m.drops,
+        "duplicated" => m.duplicated,
+        "crc_errors" => m.crc_errors,
+        "bytes_tx" => m.bytes_tx,
+        "bytes_rx" => m.bytes_rx,
+        "latency_samples" => m.latency_samples,
+        _ => return None,
+    })
+}
+
+fn stage_matches(expected: &str, stage: Stage) -> bool {
+    let want = expected.trim().to_ascii_lowercase();
+    match want.as_str() {
+        "" => stage == Stage::Active,
+        "pipeline_done" | "done" => stage.is_pipeline_done(),
+        other => stage.name().eq_ignore_ascii_case(other),
+    }
+}
+
+/// 评估单条断言。
+pub fn evaluate_one(world: &World, def: &AssertDef) -> AssertResult {
+    let mut result = AssertResult {
+        description: if def.description.is_empty() {
+            format!("{} {}", def.kind, def.device)
+        } else {
+            def.description.clone()
+        },
+        kind: def.kind.clone(),
+        passed: false,
+        detail: String::new(),
+    };
+
+    let kind = def.kind.as_str();
+    match kind {
+        "stage" => {
+            let Some(stage) = world.stage_of(&def.device, &def.peer) else {
+                result.detail = format!("{}/{} 无会话", def.device, def.peer);
+                return result;
+            };
+            result.passed = stage_matches(&def.stage, stage);
+            result.detail = format!(
+                "{}/{} 当前阶段 {}，期望 {}",
+                def.device, def.peer, stage.name(), def.stage
+            );
+        }
+        "role" => {
+            let Some(role) = world.session_role(&def.device, &def.peer) else {
+                result.detail = format!("{}/{} 无会话", def.device, def.peer);
+                return result;
+            };
+            result.passed = role.name().eq_ignore_ascii_case(&def.stage);
+            result.detail = format!("{}/{} 角色 {}，期望 {}", def.device, def.peer, role.name(), def.stage);
+        }
+        "prof" => {
+            let Some(prof) = world.device_prof(&def.device) else {
+                result.detail = format!("{} 不存在", def.device);
+                return result;
+            };
+            result.passed = prof as f64 == def.value;
+            result.detail = format!(
+                "{} 协议档 {}，期望 {}",
+                def.device,
+                if prof == 1 { "RT" } else { "STD" },
+                def.value
+            );
+        }
+        "bound" => {
+            let ok = world.total_binds_ok() as f64;
+            let need = if def.value > 0.0 { def.value } else { 1.0 };
+            result.passed = ok >= need;
+            result.detail = format!("binds_ok={ok}，期望 >= {need}");
+        }
+        "value" => {
+            let Some((v, stale, quality)) = world.received_value(&def.device, def.index, def.sub)
+            else {
+                result.detail = format!(
+                    "{} 未收到点 ({},{})",
+                    def.device, def.index, def.sub
+                );
+                return result;
+            };
+            result.passed = compare(&def.op, v, def.value, def.tolerance);
+            result.detail = format!(
+                "{} 点 ({},{}) 实际 {:.3} {} {:.3}{}",
+                def.device,
+                def.index,
+                def.sub,
+                v,
+                def.op,
+                def.value,
+                if stale { "（已过期）" } else { "" }
+            );
+            let _ = quality;
+        }
+        "query_replies" => {
+            let count = world.query_reply_count(&def.device) as f64;
+            result.passed = compare(&def.op, count, def.value, def.tolerance);
+            result.detail = format!(
+                "{} 查询应答 {count} {} {}",
+                def.device, def.op, def.value
+            );
+        }
+        "frame" => {
+            let name = if def.frame_type.is_empty() {
+                def.stage.as_str()
+            } else {
+                def.frame_type.as_str()
+            };
+            let count = world.frame_type_count(name) as f64;
+            result.passed = compare(&def.op, count, def.value, def.tolerance);
+            result.detail = format!("帧 {name} 计数 {count} {} {}", def.op, def.value);
+        }
+        other => {
+            let Some(actual) = counter(world, other) else {
+                result.detail = format!("未知断言类型 {other}");
+                return result;
+            };
+            let actual_f = actual as f64;
+            result.passed = compare(&def.op, actual_f, def.value, def.tolerance);
+            result.detail = format!("{other}={actual} {} {}", def.op, def.value);
+        }
+    }
+    result
+}
+
+pub fn evaluate_all(world: &World, defs: &[AssertDef]) -> Vec<AssertResult> {
+    defs.iter().map(|d| evaluate_one(world, d)).collect()
+}

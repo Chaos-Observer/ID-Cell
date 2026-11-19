@@ -1,0 +1,49 @@
+{
+  "name": "选择器查询：按索引区间筛选应答",
+  "duration_ms": 3000,
+  "seed": 7,
+  "key": "idcell-lab-key",
+  "link": { "media": "loopback", "delay_ms": 1 },
+  "devices": [
+    {
+      "name": "plc-01",
+      "did": "00000000-00000011",
+      "mode": "provider",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "A 相电压", "qty": "voltage", "unit": "V", "dtype": "f64" },
+        { "index": 2, "sub": 0, "label": "B 相电压", "qty": "voltage", "unit": "V", "dtype": "f64" }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 220.0, "amplitude": 2.0, "period_ms": 2000 },
+        { "index": 2, "sub": 0, "base": 221.0, "amplitude": 2.0, "period_ms": 2000 }
+      ]
+    },
+    {
+      "name": "plc-02",
+      "did": "00000000-00000012",
+      "mode": "provider",
+      "caps": [
+        { "index": 3, "sub": 0, "label": "C 相电压", "qty": "voltage", "unit": "V", "dtype": "f64" },
+        { "index": 4, "sub": 0, "label": "零序电压", "qty": "voltage", "unit": "V", "dtype": "f64" }
+      ],
+      "values": [
+        { "index": 3, "sub": 0, "base": 219.0, "amplitude": 2.0, "period_ms": 2000 },
+        { "index": 4, "sub": 0, "base": 3.0, "amplitude": 0.5, "period_ms": 2000 }
+      ]
+    },
+    {
+      "name": "gateway-app",
+      "did": "00000000-00000013",
+      "mode": "consumer"
+    }
+  ],
+  "faults": [
+    { "at_ms": 800, "kind": "query", "device": "gateway-app", "selector": "2-3/0", "mode": "all" }
+  ],
+  "asserts": [
+    { "kind": "replies_rx", "op": "==", "value": 2, "tolerance": 0.0, "description": "区间 2-3 只命中两个点" },
+    { "kind": "query_replies", "device": "gateway-app", "op": "==", "value": 2, "tolerance": 0.0, "description": "会话内恰好 2 条应答" },
+    { "kind": "queries_answered", "op": ">=", "value": 2, "description": "两个提供者都被查询到" },
+    { "kind": "query_timeouts", "op": "==", "value": 0, "tolerance": 0.0, "description": "全部应答及时到达，无超时" }
+  ]
+}

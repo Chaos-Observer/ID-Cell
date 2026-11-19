@@ -1,0 +1,50 @@
+{
+  "name": "有损链路：5% 丢包 + 2% 重复 + 3% 重排",
+  "duration_ms": 6000,
+  "seed": 7,
+  "key": "idcell-lab-key",
+  "link": {
+    "delay_ms": 15,
+    "jitter_ms": 10,
+    "loss_ppm": 50000,
+    "dup_ppm": 20000,
+    "reorder_ppm": 30000,
+    "media": "wifi",
+    "topology": "p2p",
+    "t_link_min_ms": 5
+  },
+  "devices": [
+    {
+      "name": "sensor-ble",
+      "did": "00000000-00000011",
+      "caps": [
+        {
+          "index": 1,
+          "sub": 0,
+          "label": "电量",
+          "qty": "ratio",
+          "unit": "%",
+          "dtype": "f64",
+          "t_prod_ms": 100,
+          "stale_ms": 3000
+        }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 80.0, "amplitude": 10.0, "period_ms": 4000, "noise": 0.2 }
+      ]
+    },
+    {
+      "name": "app-ble",
+      "did": "00000000-00000012",
+      "link_min_ms": 5,
+      "reqs": [
+        { "qty": "ratio", "unit": "%", "want_ms": 200, "stale_ms": 3000 }
+      ]
+    }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "app-ble", "peer": "sensor-ble", "stage": "active", "description": "有损链路仍能完成绑定" },
+    { "kind": "bound", "description": "至少一次绑定成功" },
+    { "kind": "events_rx", "op": ">=", "value": 10, "description": "仍有事件到达" }
+  ]
+}

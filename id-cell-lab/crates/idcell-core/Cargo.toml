@@ -1,0 +1,7 @@
+[package]
+name = "idcell-core"
+version.workspace = true
+edition.workspace = true
+description = "ID-CELL 协议核心：帧编解码、TLV、CRC16、HMAC-SHA256、描述符"
+
+[dependencies]

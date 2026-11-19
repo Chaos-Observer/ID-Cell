@@ -1,0 +1,64 @@
+{
+  "name": "理想链路：一杯恒温水的传感器与 App",
+  "duration_ms": 4000,
+  "seed": 42,
+  "key": "idcell-lab-key",
+  "link": {
+    "delay_ms": 1,
+    "jitter_ms": 0,
+    "loss_ppm": 0,
+    "media": "loopback",
+    "topology": "p2p",
+    "t_link_min_ms": 1
+  },
+  "devices": [
+    {
+      "name": "sensor-01",
+      "did": "00000000-00000001",
+      "group": 1,
+      "caps": [
+        {
+          "index": 1,
+          "sub": 0,
+          "label": "水温",
+          "qty": "temperature",
+          "unit": "C",
+          "dtype": "f64",
+          "scale": 2,
+          "t_prod_ms": 20,
+          "stale_ms": 1000,
+          "perm": 0
+        }
+      ],
+      "values": [
+        {
+          "index": 1,
+          "sub": 0,
+          "base": 25.0,
+          "amplitude": 5.0,
+          "period_ms": 2000,
+          "noise": 0.1
+        }
+      ]
+    },
+    {
+      "name": "app-01",
+      "did": "00000000-00000002",
+      "reqs": [
+        {
+          "qty": "temperature",
+          "unit": "C",
+          "want_ms": 50,
+          "stale_ms": 500
+        }
+      ]
+    }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "app-01", "peer": "sensor-01", "stage": "active", "description": "App 完成六段管道" },
+    { "kind": "stage", "device": "sensor-01", "peer": "app-01", "stage": "active", "description": "传感器侧进入 Active" },
+    { "kind": "bound", "description": "至少完成一次绑定" },
+    { "kind": "events_rx", "op": ">=", "value": 20, "description": "订阅事件持续到达" },
+    { "kind": "value", "device": "app-01", "index": 1, "sub": 0, "op": ">=", "value": 19.0, "tolerance": 0.0, "description": "收到有效温度" }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "name": "LoRa MTU 不足：控制帧被链路丢弃，管道无法建立",
+  "duration_ms": 4000,
+  "seed": 5,
+  "key": "idcell-lab-key",
+  "link": {
+    "media": "lora",
+    "topology": "p2p"
+  },
+  "devices": [
+    {
+      "name": "sensor-lora",
+      "did": "00000000-00000031",
+      "link_min_ms": 150,
+      "caps": [
+        {
+          "index": 1,
+          "sub": 0,
+          "label": "土壤湿度",
+          "qty": "ratio",
+          "unit": "%",
+          "t_prod_ms": 1000,
+          "stale_ms": 5000
+        }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 45.0, "amplitude": 15.0, "period_ms": 8000, "noise": 0.5 }
+      ]
+    },
+    {
+      "name": "gw-lora",
+      "did": "00000000-00000032",
+      "link_min_ms": 150,
+      "reqs": [
+        { "qty": "ratio", "unit": "%", "want_ms": 2000, "stale_ms": 5000 }
+      ]
+    }
+  ],
+  "asserts": [
+    { "kind": "drops", "op": ">=", "value": 1, "description": "超过 51 B MTU 的帧被链路丢弃" },
+    { "kind": "binds_ok", "op": "==", "value": 0, "tolerance": 0.0, "description": "MTU 不足导致绑定无法完成" }
+  ]
+}

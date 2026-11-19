@@ -1,0 +1,2495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ID-CELL 画布仿真</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --panel2: #18202b;
+    --line: #223040;
+    --text: #e6edf3;
+    --dim: #8b9bb0;
+    --accent: #4cc2ff;
+    --ok: #3ddc97;
+    --warn: #ffb454;
+    --err: #ff5c7a;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+    display: flex; flex-direction: column;
+    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 14px; background: rgba(11,15,20,.96);
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: 14px; margin: 0 6px 0 0; letter-spacing: .5px; white-space: nowrap; }
+  h1 span { color: var(--accent); }
+  .clock { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  .pill {
+    padding: 2px 9px; border-radius: 999px; font-size: 11px;
+    border: 1px solid var(--line); color: var(--dim); white-space: nowrap;
+  }
+  .pill.run { color: var(--ok); border-color: rgba(61,220,151,.4); }
+  .pill.pause { color: var(--warn); border-color: rgba(255,180,84,.4); }
+  .pill.done { color: var(--accent); border-color: rgba(76,194,255,.4); }
+  .pill.warn { color: var(--warn); border-color: rgba(255,180,84,.45); }
+  a.pill { text-decoration: none; }
+  a.pill:hover { color: var(--accent); border-color: var(--accent); }
+  .spacer { flex: 1; }
+  .sep { width: 1px; height: 20px; background: var(--line); }
+  button, select {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer;
+  }
+  button:hover, select:hover { border-color: var(--accent); }
+  button.primary { border-color: rgba(76,194,255,.5); color: var(--accent); }
+  button.danger:hover { border-color: var(--err); color: var(--err); }
+  label.lbl { color: var(--dim); font-size: 11px; display: flex; align-items: center; gap: 5px; }
+  #editor {
+    flex: 1; min-height: 0; position: relative;
+    display: grid; grid-template-columns: 52px 214px minmax(0, 1fr) 342px;
+  }
+  #rail {
+    background: #0b1118; border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: center;
+    gap: 4px; padding: 8px 0;
+  }
+  #rail button {
+    width: 38px; height: 38px; display: grid; place-items: center;
+    font-size: 15px; line-height: 1; padding: 0;
+    border: 1px solid transparent; background: transparent;
+    color: var(--dim); border-radius: 8px;
+  }
+  #rail button:hover { color: var(--text); background: var(--panel2); }
+  #rail button.on {
+    color: var(--accent); background: rgba(76,194,255,.1);
+    border-color: rgba(76,194,255,.35);
+  }
+  #rail .rail-sep { width: 24px; height: 1px; background: var(--line); margin: 4px 0; }
+  #sidebar {
+    background: #0e141c; overflow: auto; padding: 12px;
+    border-right: 1px solid var(--line);
+  }
+  #sidebar .side-panel[hidden] { display: none; }
+  .side-item {
+    background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--line); border-radius: 7px;
+    padding: 6px 8px; margin-bottom: 6px;
+  }
+  .side-item:hover { border-color: rgba(76,194,255,.5); }
+  .side-item.sel { border-left-color: var(--accent); }
+  .side-item .si-top { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .side-item .si-name {
+    font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .side-item .si-meta {
+    color: var(--dim); font-size: 10.5px; margin-top: 2px;
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .side-item .dot { width: 7px; height: 7px; border-radius: 50%; background: #52627a; flex: none; }
+  .dot.ok { background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.err { background: var(--err); }
+  .dot.dim { background: #52627a; }
+  .si-power {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+    font-size: 10px; padding: 3px 8px 3px 6px; border-radius: 999px;
+    background: #101720; border: 1px solid var(--line); color: var(--dim);
+    transition: border-color .15s, background .15s, color .15s;
+  }
+  .si-power .sw {
+    width: 24px; height: 13px; border-radius: 999px; background: #2a3646;
+    position: relative; flex: none; transition: background .15s;
+  }
+  .si-power .sw::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 9px; height: 9px; border-radius: 50%; background: #8b9bb0;
+    transition: left .15s, background .15s;
+  }
+  .si-power.on { color: var(--ok); border-color: rgba(61,220,151,.38); }
+  .si-power.on .sw { background: rgba(61,220,151,.25); }
+  .si-power.on .sw::after { left: 13px; background: var(--ok); }
+  .si-power.off {
+    color: var(--err); border-color: rgba(255,92,122,.5);
+    background: rgba(255,92,122,.08);
+  }
+  .si-power.off .sw { background: rgba(255,92,122,.22); }
+  .si-power.off .sw::after { left: 2px; background: var(--err); }
+  .side-item.power-off { box-shadow: inset 3px 0 0 var(--err); }
+  .power-card {
+    position: relative; overflow: hidden; margin-bottom: 14px; padding: 12px;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: linear-gradient(135deg, #121a24, #0f151d);
+  }
+  .power-card::before {
+    content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--ok);
+  }
+  .power-card.off {
+    border-color: rgba(255,92,122,.35);
+    background: linear-gradient(135deg, #1c1216, #12100f);
+  }
+  .power-card.off::before { background: var(--err); }
+  .pc-head { display: flex; align-items: center; gap: 10px; }
+  .pc-ico {
+    width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+    font-size: 17px; background: rgba(61,220,151,.14); color: var(--ok);
+  }
+  .power-card.off .pc-ico { background: rgba(255,92,122,.14); color: var(--err); }
+  .pc-label { font-size: 10px; letter-spacing: .8px; color: var(--dim); text-transform: uppercase; }
+  .pc-state { font-size: 15px; font-weight: 600; margin-top: 1px; color: var(--ok); }
+  .power-card.off .pc-state { color: var(--err); }
+  .big-switch {
+    margin-left: auto; width: 52px; height: 28px; padding: 0; border-radius: 999px;
+    border: 1px solid rgba(61,220,151,.45); background: rgba(61,220,151,.18);
+    position: relative; cursor: pointer; flex: none;
+  }
+  .big-switch::after {
+    content: ""; position: absolute; top: 3px; left: 28px; width: 20px; height: 20px;
+    border-radius: 50%; background: var(--ok); transition: left .18s, background .18s;
+    box-shadow: 0 0 10px rgba(61,220,151,.5);
+  }
+  .big-switch.off { border-color: rgba(255,92,122,.45); background: rgba(255,92,122,.12); }
+  .big-switch.off::after { left: 4px; background: var(--err); box-shadow: none; }
+  .quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+  .quick-actions button { padding: 6px 8px; font-size: 11px; background: #0d141c; }
+  .quick-actions button:disabled { opacity: .4; cursor: not-allowed; }
+  .side-sub {
+    font-size: 10px; color: var(--dim); text-transform: uppercase;
+    letter-spacing: .6px; margin: 10px 0 6px; font-weight: 600;
+  }
+  .comm-line {
+    display: flex; gap: 8px; font-size: 10.5px; font-family: var(--mono);
+    color: var(--dim); padding: 2px 0; border-top: 1px solid var(--line);
+  }
+  .comm-line .s { color: var(--text); }
+  aside {
+    background: #0e141c; overflow: auto; padding: 12px;
+    border-right: 1px solid var(--line);
+  }
+  #inspector { border-right: none; border-left: 1px solid var(--line); }
+
+  /* 可选监控侧边栏：覆盖在属性面板上方，关闭后不占布局 */
+  #monitor {
+    position: absolute; right: 0; top: 0; bottom: 0; width: 420px; z-index: 20;
+    display: flex; flex-direction: column;
+    background: #0b1118; border-left: 1px solid var(--line);
+    box-shadow: -18px 0 36px rgba(0,0,0,.42);
+  }
+  #monitor[hidden] { display: none; }
+  .mon-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border-bottom: 1px solid var(--line);
+  }
+  .mon-head h2 {
+    margin: 0; font-size: 12px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--dim);
+  }
+  .mon-head button { font-size: 11px; padding: 2px 9px; }
+  .mon-tabs {
+    display: flex; gap: 6px; padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .mon-tabs button { font-size: 11px; padding: 2px 10px; }
+  .mon-tabs button.on {
+    color: var(--accent); border-color: rgba(76,194,255,.5);
+    background: rgba(76,194,255,.08);
+  }
+  .mon-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 24px; }
+  .mon-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .mon-stat {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 7px; padding: 6px 8px;
+  }
+  .mon-stat .k { color: var(--dim); font-size: 10px; }
+  .mon-stat .v { font-family: var(--mono); font-size: 15px; margin-top: 1px; }
+  .mon-chart {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 7px; padding: 6px 8px; margin-top: 8px;
+  }
+  .mon-chart .mct {
+    display: flex; justify-content: space-between;
+    color: var(--dim); font-size: 10.5px; margin-bottom: 2px;
+  }
+  .mon-chart canvas { width: 100%; height: 56px; display: block; }
+  .mon-line {
+    font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+    padding: 2px 0; border-top: 1px solid var(--line);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mon-line .t { color: #52627a; display: inline-block; width: 52px; }
+  .mon-line .ty { color: var(--warn); display: inline-block; width: 74px; }
+  .mon-line .f { color: var(--accent); }
+  .mon-frame {
+    font-family: var(--mono); font-size: 10.5px; padding: 3px 0;
+    cursor: pointer; border-top: 1px solid var(--line);
+    display: flex; gap: 8px;
+  }
+  .mon-frame:hover { background: var(--panel2); }
+  .mon-hex {
+    background: #0a1018; border: 1px solid var(--line); border-radius: 5px;
+    padding: 6px 8px; margin: 2px 0 6px; font-family: var(--mono);
+    font-size: 10px; color: #9fb2c9; white-space: pre-wrap; word-break: break-all;
+  }
+  aside h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--dim); margin: 0 0 10px; font-weight: 600;
+  }
+  #pal-list { display: grid; gap: 7px; }
+  .pal {
+    display: grid; grid-template-columns: 4px 1fr; gap: 8px; align-items: stretch;
+    width: 100%; text-align: left; padding: 0; overflow: hidden;
+    background: var(--panel); border-color: var(--line);
+  }
+  .pal:hover { border-color: var(--accent); }
+  .pal .bar { border-radius: 0; }
+  .pal .txt { padding: 6px 8px 6px 0; display: grid; gap: 1px; }
+  .pal .nm { font-size: 12px; font-weight: 600; }
+  .pal .mt { font-size: 10px; color: var(--dim); }
+  .tip { color: #5f7088; font-size: 11px; line-height: 1.7; margin: 14px 0 0; }
+  #stagewrap { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+  #stage { display: block; width: 100%; height: 100%; }
+  .hud {
+    position: absolute; bottom: 10px; font-size: 11px; color: #7d8ea6;
+    background: rgba(11,15,20,.8); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 9px; pointer-events: none; max-width: 52%;
+  }
+  .hud.left { left: 12px; }
+  .hud.right { right: 12px; font-family: var(--mono); }
+  .insp-title { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+  .dim { color: var(--dim); font-size: 11.5px; line-height: 1.7; }
+  .mono { font-family: var(--mono); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .field { display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; color: var(--dim); }
+  .field input, .field select {
+    width: 100%; background: #0b1118; border: 1px solid var(--line);
+    border-radius: 5px; color: var(--text); padding: 3px 6px;
+    font-size: 11.5px; font-family: inherit;
+  }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
+  .insp-sec { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .insp-sec > h3 {
+    font-size: 11px; color: var(--dim); margin: 0 0 8px;
+    display: flex; align-items: center; gap: 8px; font-weight: 600;
+  }
+  .insp-sec > h3 button { margin-left: auto; font-size: 10px; padding: 1px 7px; }
+  .item {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 8px; margin-bottom: 7px;
+  }
+  .item-top {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+    font-size: 10.5px; color: var(--dim);
+  }
+  .item-top button { margin-left: auto; font-size: 10px; padding: 1px 6px; }
+  .row-btns { display: flex; gap: 7px; flex-wrap: wrap; }
+  .row-btns button { flex: 1; font-size: 11px; }
+  .pair {
+    display: flex; align-items: center; gap: 8px; font-size: 12px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 9px; margin-bottom: 10px;
+  }
+  .pair span { color: var(--accent); }
+  .live-row { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 0; }
+  .live-row b { font-family: var(--mono); font-weight: 500; }
+  .live-sess {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 7px; margin-top: 5px; font-size: 11px;
+  }
+  .live-sess .peer { font-weight: 600; }
+  .live-sess .st { color: var(--dim); float: right; font-family: var(--mono); }
+  .live-val { display: grid; grid-template-columns: 1fr auto; font-size: 11px; padding: 2px 0; border-top: 1px solid var(--line); }
+  .live-val .n { font-family: var(--mono); color: var(--ok); }
+  .live-val.stale .n { color: var(--warn); }
+  @media (max-width: 1120px) {
+    #editor { grid-template-columns: 48px 176px minmax(0, 1fr) 300px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>ID-CELL <span>画布仿真</span></h1>
+  <span class="pill" id="conn-pill">连接中</span>
+  <span class="clock" id="clock">0.0s / 0.0s</span>
+  <span class="pill warn" id="dirty-chip" style="display:none">拓扑未应用</span>
+  <div class="spacer"></div>
+  <label class="lbl">倍速
+    <select id="speed">
+      <option value="0.25">0.25×</option>
+      <option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option>
+      <option value="2">2×</option>
+      <option value="5">5×</option>
+      <option value="10">10×</option>
+    </select>
+  </label>
+  <button id="btn-run" class="primary">构建并运行</button>
+  <button id="btn-pause">暂停</button>
+  <button id="btn-step">步进</button>
+  <button id="btn-reset">重置</button>
+  <span class="sep"></span>
+  <button id="btn-demo">示例</button>
+  <button id="btn-import">导入</button>
+  <button id="btn-export">导出</button>
+  <button id="btn-clear" class="danger">清空</button>
+  <button id="btn-monitor">监控</button>
+  <input type="file" id="file" accept=".json,application/json" style="display:none">
+</header>
+
+<div id="editor">
+  <nav id="rail">
+    <button data-tab="palette" class="on" title="设备库">＋</button>
+    <button data-tab="comm" title="通讯详情">⇄</button>
+    <button data-tab="devices" title="设备配置">▤</button>
+    <button data-tab="scenario" title="场景与断言">⚙</button>
+  </nav>
+
+  <aside id="sidebar">
+    <section class="side-panel" data-panel="palette">
+      <h2>元件库</h2>
+      <div id="pal-list"></div>
+      <p class="tip">
+        点击元件添加到画布。<br>
+        从节点两侧圆点拖到另一节点即可连线。<br>
+        滚轮缩放，拖空白处平移。<br>
+        选中节点或连线后在右侧配置参数。
+      </p>
+    </section>
+    <section class="side-panel" data-panel="comm" hidden>
+      <h2>通讯详情</h2>
+      <div id="comm-list"><div class="dim">等待运行数据…</div></div>
+    </section>
+    <section class="side-panel" data-panel="devices" hidden>
+      <h2>设备配置</h2>
+      <div id="dev-list"><div class="dim">画布暂无设备</div></div>
+    </section>
+    <section class="side-panel" data-panel="scenario" hidden>
+      <h2>场景与断言</h2>
+      <div id="sc-list"></div>
+    </section>
+  </aside>
+
+  <div id="stagewrap">
+    <canvas id="stage"></canvas>
+    <div class="hud left" id="hint">加载中…</div>
+    <div class="hud right" id="zoom">100%</div>
+  </div>
+
+  <aside id="inspector"></aside>
+
+  <aside id="monitor" hidden>
+    <div class="mon-head">
+      <h2>实时监控</h2>
+      <div class="spacer"></div>
+      <button id="mon-close">关闭</button>
+    </div>
+    <div class="mon-tabs">
+      <button data-mon="overview" class="on">概览</button>
+      <button data-mon="trace">事件</button>
+      <button data-mon="frames">帧</button>
+    </div>
+    <div class="mon-body" id="mon-body"></div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+
+const NW = 176, NH = 96;
+const MODE_COLOR = { provider: "#4cc2ff", consumer: "#ffb454", both: "#3ddc97" };
+const MODE_LABEL = { provider: "提供者", consumer: "消费者", both: "双向" };
+
+const QTY_OPTIONS = [
+  ["ratio", "比率"], ["temperature", "温度"], ["pressure", "压力"],
+  ["voltage", "电压"], ["current", "电流"], ["power", "功率"],
+  ["frequency", "频率"], ["energy", "能量"], ["luminosity", "光度"],
+  ["velocity", "速度"], ["time", "时间"], ["length", "长度"],
+  ["angle", "角度"], ["datacount", "数据量"]
+];
+const QTY_NAMES = [
+  "ratio", "length", "angle", "mass", "time", "temperature", "current", "charge",
+  "luminosity", "force", "torque", "pressure", "velocity", "acceleration", "energy",
+  "power", "voltage", "resistance", "capacitance", "inductance", "frequency",
+  "magflux", "magdens", "datacount"
+];
+
+const MEDIA_PRESETS = {
+  loopback: { label: "本机回环", class: "local", delay_ms: 0, jitter_ms: 0, mtu: 0, uplink_kbps: 0, downlink_kbps: 0, t_link_min_ms: 0, topology: "p2p", host_proxy: false, segment: false },
+  ipc:      { label: "进程间 IPC", class: "local", delay_ms: 0, jitter_ms: 0, mtu: 0, uplink_kbps: 0, downlink_kbps: 0, t_link_min_ms: 0, topology: "p2p", host_proxy: false, segment: false },
+  uart:     { label: "串口 UART", class: "serial", delay_ms: 2, jitter_ms: 0, mtu: 512, uplink_kbps: 115, downlink_kbps: 115, t_link_min_ms: 5, topology: "p2p", host_proxy: false, segment: false, baud: 115200 },
+  rs485:    { label: "RS-485 总线", class: "serial", delay_ms: 3, jitter_ms: 0, mtu: 512, uplink_kbps: 115, downlink_kbps: 115, t_link_min_ms: 5, topology: "multi_drop", host_proxy: false, segment: false, baud: 115200 },
+  can:      { label: "CAN 总线", class: "bus", delay_ms: 2, jitter_ms: 0, mtu: 8, uplink_kbps: 1000, downlink_kbps: 1000, t_link_min_ms: 2, topology: "multi_master", host_proxy: false, segment: false, baud: 500000 },
+  usb:      { label: "USB", class: "bus", delay_ms: 1, jitter_ms: 0, mtu: 1024, uplink_kbps: 12000, downlink_kbps: 12000, t_link_min_ms: 1, topology: "p2p", host_proxy: true, segment: false },
+  ethernet: { label: "以太网", class: "lan", delay_ms: 1, jitter_ms: 0, mtu: 1500, uplink_kbps: 0, downlink_kbps: 0, t_link_min_ms: 1, topology: "switched", host_proxy: false, segment: false },
+  wifi:     { label: "Wi-Fi", class: "wireless", delay_ms: 8, jitter_ms: 6, mtu: 1400, uplink_kbps: 2000, downlink_kbps: 2000, t_link_min_ms: 10, topology: "star_host_proxy", host_proxy: false, segment: false },
+  ble:      { label: "蓝牙 BLE", class: "wireless", delay_ms: 12, jitter_ms: 4, mtu: 244, uplink_kbps: 128, downlink_kbps: 128, t_link_min_ms: 20, topology: "p2p", host_proxy: false, segment: false },
+  sub1g:    { label: "Sub-1G", class: "wireless", delay_ms: 20, jitter_ms: 5, mtu: 64, uplink_kbps: 50, downlink_kbps: 50, t_link_min_ms: 30, topology: "p2p", host_proxy: false, segment: false },
+  lora:     { label: "LoRa", class: "wireless", delay_ms: 120, jitter_ms: 20, mtu: 51, uplink_kbps: 5, downlink_kbps: 5, t_link_min_ms: 150, topology: "p2p", host_proxy: false, segment: false }
+};
+
+const TOPOLOGY_OPTIONS = ["p2p", "switched", "star_host_proxy", "multi_master", "multi_drop", "mesh"];
+
+const ARCHETYPES = [
+  {
+    key: "temp", label: "温度传感器", mode: "provider",
+    caps: [{ index: 1, sub: 0, label: "环境温度", qty: "temperature", unit: "C", dtype: "f64", scale: 2, t_prod_ms: 100, stale_ms: 2000 }],
+    reqs: [],
+    values: [{ index: 1, sub: 0, base: 24, amplitude: 4, period_ms: 6000, noise: 0.1 }]
+  },
+  {
+    key: "humidity", label: "湿度传感器", mode: "provider",
+    caps: [{ index: 1, sub: 0, label: "相对湿度", qty: "ratio", unit: "1", dtype: "f64", scale: 2, t_prod_ms: 200, stale_ms: 3000 }],
+    reqs: [],
+    values: [{ index: 1, sub: 0, base: 55, amplitude: 10, period_ms: 8000, noise: 0.3 }]
+  },
+  {
+    key: "pressure", label: "压力传感器", mode: "provider",
+    caps: [{ index: 1, sub: 0, label: "管道压力", qty: "pressure", unit: "kPa", dtype: "f64", scale: 2, t_prod_ms: 100, stale_ms: 2000 }],
+    reqs: [],
+    values: [{ index: 1, sub: 0, base: 101.3, amplitude: 2, period_ms: 5000, noise: 0.05 }]
+  },
+  {
+    key: "hvac", label: "空调控制器", mode: "consumer",
+    caps: [],
+    reqs: [{ label: "环境温度", qty: "temperature", unit: "C", want_ms: 200, stale_ms: 2000 }],
+    values: []
+  },
+  {
+    key: "display", label: "数据看板", mode: "consumer",
+    caps: [],
+    reqs: [{ label: "管道压力", qty: "pressure", unit: "kPa", want_ms: 500, stale_ms: 3000 }],
+    values: []
+  },
+  {
+    key: "gateway", label: "智能网关", mode: "both",
+    caps: [{ index: 1, sub: 0, label: "网关负载", qty: "ratio", unit: "1", dtype: "f64", scale: 2, t_prod_ms: 500, stale_ms: 3000 }],
+    reqs: [{ label: "环境湿度", qty: "ratio", unit: "1", want_ms: 300, stale_ms: 3000 }],
+    values: [{ index: 1, sub: 0, base: 42, amplitude: 12, period_ms: 7000, noise: 0.5 }]
+  },
+  {
+    key: "ctrl", label: "计算控制器", mode: "both",
+    caps: [{
+      index: 3, sub: 0, label: "平均温度", qty: "temperature", unit: "C", dtype: "f64",
+      scale: 2, t_prod_ms: 500, stale_ms: 3000
+    }],
+    reqs: [{ label: "温度输入", qty: "temperature", unit: "C", want_ms: 500, stale_ms: 3000 }],
+    values: [],
+    logic: [{
+      name: "均值", kind: "aggregate", sources: "1.0", agg: "avg", output: "3.0", min_interval_ms: 0
+    }]
+  },
+  {
+    key: "switch", label: "开关执行器", mode: "provider",
+    caps: [{
+      index: 1, sub: 0, label: "开关", qty: "ratio", unit: "1", dtype: "bool", dir: 3,
+      range: [0, 1], t_prod_ms: 100, stale_ms: 2000
+    }],
+    reqs: [],
+    values: [{ index: 1, sub: 0, base: 0, amplitude: 0, period_ms: 1000, noise: 0 }]
+  },
+  {
+    key: "knob", label: "可调执行器", mode: "provider",
+    caps: [{
+      index: 1, sub: 0, label: "输出开度", qty: "ratio", unit: "%", dtype: "f64", dir: 3,
+      range: [0, 100], t_prod_ms: 100, stale_ms: 2000
+    }],
+    reqs: [],
+    values: [{ index: 1, sub: 0, base: 50, amplitude: 0, period_ms: 1000, noise: 0 }]
+  },
+  {
+    key: "custom", label: "自定义设备", mode: "provider",
+    caps: [], reqs: [], values: []
+  }
+];
+
+const DTYPE_OPTIONS = [
+  ["f64", "f64 浮点"], ["f32", "f32 浮点"], ["bool", "bool 开关"],
+  ["u8", "u8"], ["i8", "i8"], ["u16", "u16"], ["i16", "i16"],
+  ["u32", "u32"], ["i32", "i32"], ["u64", "u64"], ["i64", "i64"]
+];
+const DTYPE_NAMES = ["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "f32", "f64", "bool", "string", "bytes"];
+
+const $ = s => document.querySelector(s);
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function qtyName(v) {
+  if (typeof v === "number") return QTY_NAMES[v] || "ratio";
+  return v || "ratio";
+}
+function qtyOptions(cur) {
+  cur = qtyName(cur);
+  return QTY_OPTIONS.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("");
+}
+function dtypeOptions(cur) {
+  return DTYPE_OPTIONS.map(([v, l]) =>
+    `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("");
+}
+const OP_OPTIONS = [[">", "大于 >"], [">=", "大于等于 ≥"], ["<", "小于 <"], ["<=", "小于等于 ≤"], ["==", "等于 ="], ["between", "区间 between"]];
+const AGG_OPTIONS = [["avg", "平均"], ["sum", "求和"], ["min", "最小"], ["max", "最大"], ["count", "计数"]];
+function opOptions(cur) {
+  return OP_OPTIONS.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("");
+}
+function aggOptions(cur) {
+  return AGG_OPTIONS.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("");
+}
+
+let G = { name: "画布拓扑", duration_ms: 12000, seed: 42, require_link: true, max_hops: 6, nodes: [], links: [], faults: [], asserts: [], key: null, tick_ms: 0 };
+let selected = null;
+let cam = { x: 40, y: 40, k: 1 };
+let dirty = false;
+let nid = 1, lid = 1, didSeq = 1;
+
+const live = {
+  connected: false, now: 0, duration: 0, paused: true, final: false,
+  devices: {}, metricsById: {}, byPair: {}, frames: [], snapshot: null
+};
+let activeTab = "palette";
+let monOpen = false;
+let monTab = "overview";
+const monHist = { p50: [], p95: [], rate: [] };
+let monLastFrames = 0, monLastT = 0;
+const monExpanded = new Set();
+let particles = [];
+let seenFrames = new Set();
+let prevDropped = new Map();
+let flashUntil = new Map();
+let drag = null;
+let hover = { node: null, link: null, port: null };
+let mouseWorld = { x: 0, y: 0 };
+let booted = false;
+
+const canvas = $("#stage");
+const wrap = $("#stagewrap");
+const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+/* ---------- 图模型 ---------- */
+
+function nodeById(id) { return G.nodes.find(n => n.id === id); }
+function linkById(id) { return G.links.find(l => l.id === id); }
+function pairKey(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
+
+function nextDid() {
+  return "00000000-" + (didSeq++).toString(16).toUpperCase().padStart(8, "0");
+}
+function uniqueName(base) {
+  let name = base, i = 2;
+  while (G.nodes.some(n => n.name === name)) name = base + " " + i++;
+  return name;
+}
+function mkNode(arch, x, y) {
+  return {
+    id: "n" + nid++, name: uniqueName(arch.label), did: nextDid(),
+    x, y, group: 0, start_ms: 0, mode: arch.mode, preempt: false, relay: false, prof: 0,
+    caps: JSON.parse(JSON.stringify(arch.caps || [])),
+    reqs: JSON.parse(JSON.stringify(arch.reqs || [])),
+    values: JSON.parse(JSON.stringify(arch.values || [])),
+    logic: JSON.parse(JSON.stringify(arch.logic || []))
+  };
+}
+function addNode(arch, x, y) {
+  const n = mkNode(arch, x, y);
+  G.nodes.push(n);
+  selected = { kind: "node", id: n.id };
+  markDirty();
+  renderInspector();
+  return n;
+}
+function removeNode(id) {
+  G.nodes = G.nodes.filter(n => n.id !== id);
+  G.links = G.links.filter(l => l.a !== id && l.b !== id);
+  if (selected && selected.id === id) selected = null;
+  markDirty();
+  renderInspector();
+}
+function addLink(aId, bId) {
+  if (!aId || !bId || aId === bId) return null;
+  const old = G.links.find(l => (l.a === aId && l.b === bId) || (l.a === bId && l.b === aId));
+  if (old) { selected = { kind: "link", id: old.id }; renderInspector(); return old; }
+  const l = Object.assign({
+    id: "l" + lid++, a: aId, b: bId, media: "wifi"
+  }, MEDIA_PRESETS.wifi);
+  G.links.push(l);
+  selected = { kind: "link", id: l.id };
+  markDirty();
+  renderInspector();
+  return l;
+}
+function removeLink(id) {
+  G.links = G.links.filter(l => l.id !== id);
+  if (selected && selected.id === id) selected = null;
+  markDirty();
+  renderInspector();
+}
+function markDirty() {
+  dirty = true;
+  updateTopbar();
+}
+
+/* ---------- 场景读写 ---------- */
+
+function normalizeCap(c, i) {
+  return {
+    index: c.index != null ? +c.index : i + 1,
+    sub: c.sub != null ? +c.sub : 0,
+    label: c.label || "能力点" + (i + 1),
+    qty: qtyName(c.qty),
+    unit: c.unit || "",
+    dtype: typeof c.dtype === "number"
+      ? (DTYPE_NAMES[c.dtype] || "f64")
+      : (c.dtype || "f64"),
+    dir: c.dir != null ? +c.dir : 1,
+    scale: c.scale != null ? +c.scale : 0,
+    range: Array.isArray(c.range) ? [+c.range[0] || 0, +c.range[1] || 0] : [0, 100],
+    t_prod_ms: c.t_prod_ms != null ? +c.t_prod_ms : 10,
+    stale_ms: c.stale_ms != null ? +c.stale_ms : 1000
+  };
+}
+function normalizeReq(r) {
+  return {
+    label: r.label || "需求",
+    qty: qtyName(r.qty),
+    unit: r.unit || "",
+    want_ms: r.want_ms != null ? +r.want_ms : 50,
+    stale_ms: r.stale_ms != null ? +r.stale_ms : 500
+  };
+}
+function normalizeValue(v, i) {
+  return {
+    index: v.index != null ? +v.index : 1,
+    sub: v.sub != null ? +v.sub : 0,
+    base: v.base != null ? +v.base : 0,
+    amplitude: v.amplitude != null ? +v.amplitude : 0,
+    period_ms: v.period_ms != null ? +v.period_ms : 1000,
+    noise: v.noise != null ? +v.noise : 0
+  };
+}
+function pointText(p) {
+  if (Array.isArray(p)) return (+p[0]) + "." + (+p[1] || 0);
+  return String(p || "");
+}
+function normalizeLogic(l) {
+  const sources = [];
+  if (l.input) sources.push(pointText(l.input));
+  (l.sources || []).forEach(s => sources.push(pointText(s)));
+  return {
+    name: l.name || "规则",
+    kind: l.kind || "threshold",
+    sources: sources.join(","),
+    op: l.op || ">=",
+    threshold: l.threshold != null ? +l.threshold : (l.value != null ? +l.value : 0),
+    threshold2: l.threshold2 != null ? +l.threshold2 : 0,
+    on: l.on != null ? +l.on : (l.write_value != null ? +l.write_value : 1),
+    off: l.off != null ? +l.off : 0,
+    agg: l.agg || "avg",
+    target: l.target || "",
+    output: pointText(l.output || "1.0"),
+    min_interval_ms: l.min_interval_ms != null ? +l.min_interval_ms : 0
+  };
+}
+
+function loadScenario(obj) {
+  G = {
+    name: obj.name || "画布拓扑",
+    duration_ms: obj.duration_ms || 12000,
+    seed: obj.seed != null ? obj.seed : 42,
+    require_link: obj.require_link !== false,
+    max_hops: obj.max_hops != null ? obj.max_hops : 6,
+    nodes: [], links: [],
+    faults: Array.isArray(obj.faults) ? obj.faults : [],
+    asserts: Array.isArray(obj.asserts) ? obj.asserts : [],
+    key: obj.key || null,
+    tick_ms: obj.tick_ms || 0
+  };
+  const pos = {};
+  if (obj.ui && Array.isArray(obj.ui.nodes)) {
+    for (const p of obj.ui.nodes) if (p && p.name) pos[p.name] = p;
+  }
+  const nameToId = {};
+  for (const d of (obj.devices || [])) {
+    const mode = d.mode || ((d.caps && d.caps.length) ? ((d.reqs && d.reqs.length) ? "both" : "provider") : "consumer");
+    const n = {
+      id: "n" + nid++,
+      name: d.name || ("设备" + (Object.keys(nameToId).length + 1)),
+      did: d.did || nextDid(),
+      x: 0, y: 0,
+      group: d.group || 0,
+      start_ms: d.start_ms || 0,
+      mode,
+      preempt: !!d.preempt,
+      relay: !!d.relay,
+      prof: d.protocol === "rt" ? 1 : (+d.prof === 1 ? 1 : 0),
+      caps: (d.caps || []).map(normalizeCap),
+      reqs: (d.reqs || []).map(normalizeReq),
+      values: (d.values || []).map(normalizeValue),
+      logic: (d.logic || []).map(normalizeLogic)
+    };
+    nameToId[n.name] = n.id;
+    G.nodes.push(n);
+  }
+  for (const l of (obj.links || [])) {
+    const a = nameToId[l.a], b = nameToId[l.b];
+    if (!a || !b || a === b) continue;
+    const media = l.media || "loopback";
+    const preset = MEDIA_PRESETS[media] || MEDIA_PRESETS.loopback;
+    G.links.push(Object.assign({
+      id: "l" + lid++, a, b, media
+    }, preset, {
+      delay_ms: l.delay_ms != null ? +l.delay_ms : preset.delay_ms,
+      jitter_ms: l.jitter_ms != null ? +l.jitter_ms : preset.jitter_ms,
+      loss_ppm: l.loss_ppm != null ? +l.loss_ppm : 0,
+      dup_ppm: l.dup_ppm != null ? +l.dup_ppm : 0,
+      reorder_ppm: l.reorder_ppm != null ? +l.reorder_ppm : 0,
+      mtu: l.mtu != null ? +l.mtu : preset.mtu,
+      uplink_kbps: l.uplink_kbps != null ? +l.uplink_kbps : preset.uplink_kbps,
+      downlink_kbps: l.downlink_kbps != null ? +l.downlink_kbps : preset.downlink_kbps,
+      t_link_min_ms: l.t_link_min_ms != null ? +l.t_link_min_ms : preset.t_link_min_ms,
+      topology: l.topology || preset.topology,
+      host_proxy: l.host_proxy != null ? !!l.host_proxy : preset.host_proxy,
+      segment: l.segment != null ? !!l.segment : !!preset.segment,
+      baud: l.baud != null ? +l.baud : (preset.baud || 0)
+    }));
+  }
+  G.nodes.forEach((n, i) => {
+    const p = pos[n.name];
+    if (p && Number.isFinite(+p.x) && Number.isFinite(+p.y)) {
+      n.x = +p.x; n.y = +p.y;
+    } else {
+      n.x = 70 + (i % 3) * 260;
+      n.y = 70 + Math.floor(i / 3) * 170;
+    }
+  });
+  selected = null;
+  dirty = false;
+  updateHint();
+}
+
+function ensureUniqueDids() {
+  const used = new Set();
+  for (const n of G.nodes) {
+    let did = String(n.did || "").trim();
+    const clean = did.replace(/-/g, "");
+    if (!/^[0-9A-Fa-f]{16}$/.test(clean) || used.has(clean.toUpperCase())) {
+      let tries = 0;
+      do { did = nextDid(); tries++; } while (used.has(did.replace(/-/g, "").toUpperCase()) && tries < 1000);
+      n.did = did;
+    }
+    used.add(did.replace(/-/g, "").toUpperCase());
+  }
+}
+
+function buildScenario() {
+  ensureUniqueDids();
+  const devices = G.nodes.map(n => {
+    const d = { name: n.name, did: n.did, group: +n.group || 0, start_ms: +n.start_ms || 0, mode: n.mode };
+    if (n.preempt) d.preempt = true;
+    if (n.relay) d.relay = true;
+    if (+n.prof === 1) d.protocol = "rt";
+    if (n.caps.length) {
+      d.caps = n.caps.map(c => {
+        const o = {
+          index: +c.index || 1, sub: +c.sub || 0, label: c.label || "",
+          qty: c.qty, t_prod_ms: +c.t_prod_ms || 0, stale_ms: +c.stale_ms || 0
+        };
+        if (c.unit) o.unit = c.unit;
+        if (c.dtype != null) o.dtype = c.dtype;
+        if (c.dir != null && +c.dir !== 1) o.dir = +c.dir;
+        if (Array.isArray(c.range)) o.range = [+c.range[0], +c.range[1]];
+        if (c.scale) o.scale = +c.scale;
+        return o;
+      });
+    }
+    if (n.reqs.length) {
+      d.reqs = n.reqs.map(r => {
+        const o = {
+          label: r.label || "", qty: r.qty,
+          want_ms: +r.want_ms || 0, stale_ms: +r.stale_ms || 0
+        };
+        if (r.unit) o.unit = r.unit;
+        return o;
+      });
+    }
+    if (n.values.length) {
+      d.values = n.values.map(v => ({
+        index: +v.index || 1, sub: +v.sub || 0,
+        base: +v.base || 0, amplitude: +v.amplitude || 0,
+        period_ms: +v.period_ms || 1000, noise: +v.noise || 0
+      }));
+    }
+    if (n.logic.length) {
+      d.logic = n.logic.map(r => {
+        const o = { name: r.name || "规则", kind: r.kind || "threshold", output: r.output || "1.0" };
+        const src = String(r.sources || "").split(/[,;\s]+/).filter(Boolean);
+        if (src.length) o.sources = src;
+        if (r.kind === "aggregate") {
+          o.agg = r.agg || "avg";
+        } else {
+          o.op = r.op || ">=";
+          o.threshold = +r.threshold || 0;
+          o.on = +r.on || 0;
+          o.off = +r.off || 0;
+          if (+r.threshold2) o.threshold2 = +r.threshold2;
+        }
+        if (r.target) o.target = r.target;
+        if (+r.min_interval_ms) o.min_interval_ms = +r.min_interval_ms;
+        return o;
+      });
+    }
+    return d;
+  });
+  const links = G.links.map(l => {
+    const a = nodeById(l.a), b = nodeById(l.b);
+    if (!a || !b) return null;
+    return {
+      a: a.name, b: b.name, media: l.media,
+      topology: l.topology,
+      delay_ms: +l.delay_ms || 0,
+      jitter_ms: +l.jitter_ms || 0,
+      loss_ppm: +l.loss_ppm || 0,
+      dup_ppm: +l.dup_ppm || 0,
+      reorder_ppm: +l.reorder_ppm || 0,
+      mtu: +l.mtu || 0,
+      uplink_kbps: +l.uplink_kbps || 0,
+      downlink_kbps: +l.downlink_kbps || 0,
+      t_link_min_ms: +l.t_link_min_ms || 1,
+      host_proxy: !!l.host_proxy,
+      segment: !!l.segment,
+      baud: +l.baud || 0
+    };
+  }).filter(Boolean);
+  const out = {
+    name: G.name || "画布拓扑",
+    duration_ms: +G.duration_ms || 12000,
+    seed: +G.seed || 42,
+    require_link: !!G.require_link,
+    max_hops: +G.max_hops || 6,
+    link: { media: "ethernet" },
+    devices,
+    links,
+    ui: { nodes: G.nodes.map(n => ({ name: n.name, x: Math.round(n.x), y: Math.round(n.y) })) }
+  };
+  if (G.key) out.key = G.key;
+  if (G.tick_ms) out.tick_ms = G.tick_ms;
+  if (G.faults && G.faults.length) out.faults = G.faults;
+  if (G.asserts && G.asserts.length) out.asserts = G.asserts;
+  return out;
+}
+
+async function applyTopology(silent) {
+  if (G.nodes.length === 0) {
+    if (!silent) alert("请先添加至少一个设备");
+    return false;
+  }
+  const payload = JSON.stringify(buildScenario());
+  let j;
+  try {
+    const r = await fetch("/api/scenario", { method: "POST", body: payload });
+    j = await r.json();
+  } catch (e) {
+    if (!silent) alert("网络错误：" + e.message);
+    return false;
+  }
+  if (!j.ok) {
+    if (!silent) alert("应用失败：" + j.msg);
+    else console.warn("应用失败：" + j.msg);
+    return false;
+  }
+  dirty = false;
+  resetLive();
+  updateTopbar();
+  return true;
+}
+
+/* ---------- 画布视图 ---------- */
+
+function fitCanvas() {
+  const w = Math.max(1, wrap.clientWidth), h = Math.max(1, wrap.clientHeight);
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  return { w, h };
+}
+function fitView() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  if (!G.nodes.length) { cam = { x: 40, y: 40, k: 1 }; return; }
+  let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+  for (const n of G.nodes) {
+    minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + NW); maxY = Math.max(maxY, n.y + NH);
+  }
+  const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
+  const k = Math.min((w - 120) / bw, (h - 120) / bh, 1.3);
+  cam.k = Math.max(0.35, k);
+  cam.x = (w - bw * cam.k) / 2 - minX * cam.k;
+  cam.y = (h - bh * cam.k) / 2 - minY * cam.k;
+  updateZoom();
+}
+function updateZoom() { $("#zoom").textContent = Math.round(cam.k * 100) + "%"; }
+function toWorld(e) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left - cam.x) / cam.k,
+    y: (e.clientY - r.top - cam.y) / cam.k
+  };
+}
+function nodeAt(x, y) {
+  for (let i = G.nodes.length - 1; i >= 0; i--) {
+    const n = G.nodes[i];
+    if (x >= n.x && x <= n.x + NW && y >= n.y && y <= n.y + NH) return n;
+  }
+  return null;
+}
+function portAt(x, y) {
+  const r = 9 / cam.k;
+  for (let i = G.nodes.length - 1; i >= 0; i--) {
+    const n = G.nodes[i];
+    const cy = n.y + NH / 2;
+    if (Math.hypot(x - n.x, y - cy) <= r) return { node: n, side: "left" };
+    if (Math.hypot(x - (n.x + NW), y - cy) <= r) return { node: n, side: "right" };
+  }
+  return null;
+}
+function linkGeom(a, b) {
+  const ac = { x: a.x + NW / 2, y: a.y + NH / 2 };
+  const bc = { x: b.x + NW / 2, y: b.y + NH / 2 };
+  const dx = bc.x - ac.x;
+  const p0 = dx >= 0 ? { x: a.x + NW, y: ac.y } : { x: a.x, y: ac.y };
+  const p1 = dx >= 0 ? { x: b.x, y: bc.y } : { x: b.x + NW, y: bc.y };
+  const off = Math.max(45, Math.abs(p1.x - p0.x) * 0.45);
+  const c1 = { x: p0.x + (dx >= 0 ? off : -off), y: p0.y };
+  const c2 = { x: p1.x - (dx >= 0 ? off : -off), y: p1.y };
+  return { p0, c1, c2, p1 };
+}
+function bez(p0, c1, c2, p1, t) {
+  const u = 1 - t;
+  return {
+    x: u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p1.x,
+    y: u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p1.y
+  };
+}
+function linkAt(x, y) {
+  const tol = 10 / cam.k;
+  for (let i = G.links.length - 1; i >= 0; i--) {
+    const l = G.links[i];
+    const a = nodeById(l.a), b = nodeById(l.b);
+    if (!a || !b) continue;
+    const g = linkGeom(a, b);
+    let last = g.p0;
+    for (let s = 1; s <= 24; s++) {
+      const p = bez(g.p0, g.c1, g.c2, g.p1, s / 24);
+      if (distToSeg(x, y, last, p) <= tol) return l;
+      last = p;
+    }
+  }
+  return null;
+}
+function distToSeg(px, py, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? ((px - a.x) * dx + (py - a.y) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
+}
+
+/* ---------- 交互 ---------- */
+
+canvas.addEventListener("pointerdown", e => {
+  if (e.button === 1) {
+    drag = { mode: "pan", sx: e.clientX, sy: e.clientY, camx: cam.x, camy: cam.y };
+    canvas.setPointerCapture(e.pointerId);
+    return;
+  }
+  if (e.button !== 0) return;
+  const p = toWorld(e);
+  mouseWorld = p;
+  canvas.setPointerCapture(e.pointerId);
+
+  const port = portAt(p.x, p.y);
+  if (port) {
+    drag = { mode: "connect", from: port.node, x: p.x, y: p.y };
+    return;
+  }
+  const n = nodeAt(p.x, p.y);
+  if (n) {
+    selected = { kind: "node", id: n.id };
+    renderInspector();
+    drag = { mode: "node", node: n, dx: p.x - n.x, dy: p.y - n.y };
+    return;
+  }
+  const l = linkAt(p.x, p.y);
+  if (l) {
+    selected = { kind: "link", id: l.id };
+    renderInspector();
+    drag = null;
+    return;
+  }
+  if (selected) { selected = null; renderInspector(); }
+  drag = { mode: "pan", sx: e.clientX, sy: e.clientY, camx: cam.x, camy: cam.y };
+});
+
+canvas.addEventListener("pointermove", e => {
+  const p = toWorld(e);
+  mouseWorld = p;
+  hover.port = portAt(p.x, p.y);
+  hover.node = hover.port ? hover.port.node : nodeAt(p.x, p.y);
+  hover.link = hover.node ? null : linkAt(p.x, p.y);
+
+  if (!drag) {
+    canvas.style.cursor = hover.port ? "crosshair" : hover.node ? "grab" : hover.link ? "pointer" : "default";
+    return;
+  }
+  if (drag.mode === "node") {
+    drag.node.x = Math.round(p.x - drag.dx);
+    drag.node.y = Math.round(p.y - drag.dy);
+    canvas.style.cursor = "grabbing";
+  } else if (drag.mode === "pan") {
+    cam.x = drag.camx + (e.clientX - drag.sx);
+    cam.y = drag.camy + (e.clientY - drag.sy);
+  } else if (drag.mode === "connect") {
+    drag.x = p.x; drag.y = p.y;
+    canvas.style.cursor = "crosshair";
+  }
+});
+
+canvas.addEventListener("pointerup", e => {
+  if (drag && drag.mode === "connect") {
+    const p = toWorld(e);
+    const target = portAt(p.x, p.y);
+    const node = target ? target.node : nodeAt(p.x, p.y);
+    if (node && node.id !== drag.from.id) addLink(drag.from.id, node.id);
+  }
+  drag = null;
+  canvas.style.cursor = "default";
+});
+canvas.addEventListener("pointercancel", () => { drag = null; });
+
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const k0 = cam.k;
+  const k = Math.max(0.3, Math.min(2.6, k0 * Math.exp(-e.deltaY * 0.0015)));
+  const wx = (mx - cam.x) / k0, wy = (my - cam.y) / k0;
+  cam.k = k;
+  cam.x = mx - wx * k;
+  cam.y = my - wy * k;
+  updateZoom();
+}, { passive: false });
+
+window.addEventListener("keydown", e => {
+  const tag = (document.activeElement && document.activeElement.tagName) || "";
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (e.key === "Delete" || e.key === "Backspace") {
+    if (selected && selected.kind === "node") removeNode(selected.id);
+    else if (selected && selected.kind === "link") removeLink(selected.id);
+  }
+  if (e.key === "Escape") { selected = null; renderInspector(); }
+});
+
+/* ---------- 实时数据 ---------- */
+
+function connectLive() {
+  const es = new EventSource("/api/stream");
+  es.onopen = () => { live.connected = true; updateTopbar(); };
+  es.onmessage = ev => {
+    try { onSnapshot(JSON.parse(ev.data)); } catch (err) { console.error(err); }
+  };
+  es.onerror = () => {
+    live.connected = false;
+    updateTopbar();
+  };
+}
+
+function onSnapshot(d) {
+  live.connected = true;
+  live.snapshot = d;
+  live.now = d.now_ms || 0;
+  live.duration = d.duration_ms || 0;
+  live.paused = !!d.paused;
+  live.final = !!d.final;
+  live.devices = {};
+  for (const dv of (d.devices || [])) live.devices[dv.name] = dv;
+
+  const byPair = {};
+  for (const lm of (d.links || [])) byPair[pairKey(lm.a, lm.b)] = lm;
+  live.byPair = byPair;
+  live.metricsById = {};
+  for (const l of G.links) {
+    const a = nodeById(l.a), b = nodeById(l.b);
+    if (!a || !b) continue;
+    const m = byPair[pairKey(a.name, b.name)];
+    if (!m) continue;
+    live.metricsById[l.id] = m;
+    const prev = prevDropped.get(l.id) || 0;
+    if (m.dropped > prev) flashUntil.set(l.id, performance.now() + 900);
+    prevDropped.set(l.id, m.dropped);
+  }
+
+  for (const f of (d.frames || [])) {
+    const key = f.t + "-" + f.seq + "-" + f.from + "-" + f.to + "-" + f.type;
+    if (seenFrames.has(key)) continue;
+    seenFrames.add(key);
+    spawnFrame(f);
+  }
+  if (seenFrames.size > 2400) {
+    seenFrames = new Set(Array.from(seenFrames).slice(-1000));
+  }
+  updateTopbar();
+  updateLiveBox();
+  updatePowerCard();
+  renderSidePanels();
+  recordMon(d);
+  renderMonitor();
+}
+
+function spawnFrame(f) {
+  const from = G.nodes.find(n => n.name === f.from);
+  if (!from) return;
+  const names = f.to === "*" ? G.nodes.map(n => n.name) : String(f.to).split(",");
+  for (const name of names) {
+    const to = G.nodes.find(n => n.name === name.trim());
+    if (!to || to.id === from.id) continue;
+    const l = G.links.find(x => (x.a === from.id && x.b === to.id) || (x.a === to.id && x.b === from.id));
+    if (!l) continue;
+    particles.push({
+      link: l.id,
+      dir: l.a === from.id ? 1 : -1,
+      t0: performance.now(),
+      dur: 520 + Math.min(700, (+l.delay_ms || 1) * 6)
+    });
+  }
+  if (particles.length > 420) particles = particles.slice(-260);
+}
+
+function resetLive() {
+  particles = [];
+  seenFrames = new Set();
+  prevDropped = new Map();
+  flashUntil = new Map();
+}
+
+/* ---------- 渲染 ---------- */
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function clipText(ctx, text, maxW) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let s = text;
+  while (s.length > 1 && ctx.measureText(s + "…").width > maxW) s = s.slice(0, -1);
+  return s + "…";
+}
+
+function nodeStatus(n) {
+  const d = live.devices[n.name];
+  if (!d) return { color: "#52627a", label: "未运行" };
+  if (!d.powered) return { color: "#ff5c7a", label: "已断电" };
+  if (!d.awake) return { color: "#8b9bb0", label: "休眠" };
+  if (!d.rx_on) return { color: "#ff5c7a", label: "接收机关闭" };
+  if (d.sessions.some(s => s.stage === "active")) return { color: "#3ddc97", label: "Active" };
+  if (d.sessions.length) return { color: "#ffb454", label: d.sessions[0].stage };
+  return { color: "#4cc2ff", label: "发现中" };
+}
+
+/* ---------- 左侧可切换栏 ---------- */
+
+function stageInfo(n) {
+  const d = live.devices[n.name];
+  if (!d) return { cls: "dim", text: "未运行" };
+  if (!d.powered) return { cls: "err", text: "已断电" };
+  if (!d.awake) return { cls: "dim", text: "休眠" };
+  if (!d.rx_on) return { cls: "err", text: "RX 关" };
+  if (d.sessions.some(s => s.stage === "active")) return { cls: "ok", text: "Active" };
+  if (d.sessions.length) return { cls: "warn", text: d.sessions[0].stage };
+  return { cls: "warn", text: "发现中" };
+}
+
+function focusNode(id) {
+  selected = { kind: "node", id };
+  renderInspector();
+}
+
+function renderComm() {
+  const box = document.getElementById("comm-list");
+  if (!box) return;
+  const snap = live.snapshot;
+  if (!snap) { box.innerHTML = '<div class="dim">等待运行数据…</div>'; return; }
+  let html = '<div class="side-sub">链路</div>';
+  const links = snap.links || [];
+  html += links.length
+    ? links.map(l => `<div class="comm-line">
+        <span class="s">${esc(l.a)}⇄${esc(l.b)}</span>
+        <span>帧 ${l.frames}</span><span>丢 ${l.dropped}</span>
+        ${l.partitioned ? '<span style="color:var(--err)">隔离</span>' : ''}
+      </div>`).join("")
+    : '<div class="dim">无显式链路</div>';
+
+  html += '<div class="side-sub">会话</div>';
+  const rows = G.nodes
+    .map(n => ({ n, d: live.devices[n.name] }))
+    .filter(x => x.d && x.d.sessions && x.d.sessions.length);
+  html += rows.length ? rows.map(({ n, d }) => {
+    const st = stageInfo(n);
+    return `<div class="side-item" data-focus-node="${n.id}" style="cursor:pointer">
+      <div class="si-top">
+        <span class="dot ${st.cls}"></span>
+        <span class="si-name">${esc(n.name)}</span>
+        <span class="si-meta" style="margin:0 0 0 auto">${esc(d.profile || "")}</span>
+      </div>
+      ${d.sessions.map(s => `<div class="comm-line">
+        <span class="s">${esc(s.peer)}</span>
+        <span>${esc(s.stage)}</span>
+        <span>${esc(s.role)}</span>
+        <span>${s.stale ? "过期" : "T_pub " + s.t_pub_ms + "ms"}</span>
+      </div>`).join("")}
+    </div>`;
+  }).join("") : '<div class="dim">暂无活跃会话</div>';
+
+  box.innerHTML = html;
+  box.querySelectorAll("[data-focus-node]").forEach(el => {
+    el.onclick = () => focusNode(el.dataset.focusNode);
+  });
+}
+
+function renderDeviceList() {
+  const box = document.getElementById("dev-list");
+  if (!box) return;
+  if (!G.nodes.length) { box.innerHTML = '<div class="dim">画布暂无设备</div>'; return; }
+  box.innerHTML = G.nodes.map(n => {
+    const d = live.devices[n.name];
+    const st = stageInfo(n);
+    const powered = !d || d.powered;
+    const sel = selected && selected.kind === "node" && selected.id === n.id;
+    return `<div class="side-item ${sel ? "sel" : ""} ${powered ? "" : "power-off"}" data-focus-node="${n.id}" style="cursor:pointer">
+      <div class="si-top">
+        <span class="dot ${st.cls}"></span>
+        <span class="si-name">${esc(n.name)}</span>
+        <button class="si-power ${powered ? "on" : "off"}" data-power="${esc(n.name)}" title="${powered ? "点击断电" : "点击上电"}">
+          <span class="sw"></span><span>${powered ? "运行" : "断电"}</span>
+        </button>
+      </div>
+      <div class="si-meta">
+        <span>${esc(d ? (d.profile || "设备") : "未运行")}</span>
+        ${n.prof === 1 ? '<span style="color:var(--accent)">RT</span>' : ""}
+        <span>${st.text}</span>
+        <span>cap ${n.caps.length}</span>
+        <span>req ${n.reqs.length}</span>
+        ${d ? `<span>会话 ${d.sessions.length}</span><span>点 ${d.values.length}</span>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+  box.querySelectorAll("[data-focus-node]").forEach(el => {
+    el.onclick = e => {
+      if (e.target.closest("[data-power]")) return;
+      focusNode(el.dataset.focusNode);
+    };
+  });
+  box.querySelectorAll("[data-power]").forEach(btn => {
+    btn.onclick = e => {
+      e.stopPropagation();
+      const d = live.devices[btn.dataset.power];
+      postFault({ kind: d && d.powered ? "power_off" : "power_on", device: btn.dataset.power });
+    };
+  });
+}
+
+function renderScenarioSide() {
+  const box = document.getElementById("sc-list");
+  if (!box) return;
+  const snap = live.snapshot;
+  const asserts = (snap && snap.assertions) || [];
+  const passed = asserts.filter(a => a.passed).length;
+  box.innerHTML = `
+    <div class="side-item sel">
+      <div class="si-top"><span class="dot ok"></span><span class="si-name">${esc(G.name)}</span></div>
+      <div class="si-meta">
+        <span>${(G.duration_ms / 1000).toFixed(1)}s</span>
+        <span>seed ${G.seed}</span>
+        <span>${G.require_link ? "强制连线" : "默认链路"}</span>
+        <span>跳数 ≤ ${G.max_hops}</span>
+      </div>
+    </div>
+    <div class="side-sub">断言 ${passed}/${asserts.length}</div>
+    ${asserts.length
+      ? asserts.map(a => `<div class="side-item" style="cursor:default;border-left-color:${a.passed ? "var(--ok)" : "var(--err)"}">
+          <div class="si-top"><span class="dot ${a.passed ? "ok" : "err"}"></span>
+            <span class="si-name" style="font-weight:500">${esc(a.description)}</span></div>
+          <div class="si-meta">${esc(a.detail || "")}</div>
+        </div>`).join("")
+      : '<div class="dim">该场景未定义断言</div>'}
+    <p class="tip">选中设备或链路后在右侧编辑参数；改动后点「构建并运行」重新开始。</p>`;
+}
+
+function renderSidePanels() {
+  if (activeTab === "comm") renderComm();
+  else if (activeTab === "devices") renderDeviceList();
+  else if (activeTab === "scenario") renderScenarioSide();
+}
+
+function setTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll("#rail button").forEach(b =>
+    b.classList.toggle("on", b.dataset.tab === tab));
+  document.querySelectorAll("#sidebar .side-panel").forEach(p => {
+    p.hidden = p.dataset.panel !== tab;
+  });
+  renderSidePanels();
+}
+
+/* ---------- 可选监控侧边栏 ---------- */
+
+function toggleMonitor(force) {
+  monOpen = force == null ? !monOpen : !!force;
+  const el = document.getElementById("monitor");
+  el.hidden = !monOpen;
+  document.getElementById("btn-monitor").classList.toggle("primary", monOpen);
+  if (monOpen) renderMonitor();
+}
+
+function setMonTab(tab) {
+  monTab = tab;
+  document.querySelectorAll(".mon-tabs button").forEach(b =>
+    b.classList.toggle("on", b.dataset.mon === tab));
+  renderMonitor();
+}
+
+function recordMon(d) {
+  const m = d.metrics || {};
+  if (d.now_ms <= monLastT) return;
+  const dt = d.now_ms - monLastT;
+  const rate = monLastT === 0 ? 0 : (m.frames_tx - monLastFrames) * 1000 / dt;
+  monLastFrames = m.frames_tx || 0;
+  monLastT = d.now_ms;
+  monHist.p50.push(m.p50_latency_ms || 0);
+  monHist.p95.push(m.p95_latency_ms || 0);
+  monHist.rate.push(rate);
+  for (const k of Object.keys(monHist)) {
+    if (monHist[k].length > 160) monHist[k].shift();
+  }
+}
+
+function monSpark(canvas, series) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = "#223040";
+  ctx.beginPath();
+  ctx.moveTo(0, h - 1); ctx.lineTo(w, h - 1);
+  ctx.stroke();
+  let max = 1;
+  for (const s of series) for (const v of s.values) max = Math.max(max, v);
+  for (const s of series) {
+    if (s.values.length < 2) continue;
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    const n = s.values.length;
+    s.values.forEach((v, i) => {
+      const x = (i / (n - 1)) * (w - 2) + 1;
+      const y = h - 2 - (v / max) * (h - 8);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+}
+
+function monDecode(hex) {
+  const b = [];
+  for (let i = 0; i + 1 < hex.length; i += 2) b.push(parseInt(hex.slice(i, i + 2), 16));
+  if (b.length < 40) return "帧过短";
+  const u16 = o => (b[o] << 8) | b[o + 1];
+  const hexAt = (start, n) => {
+    let s = "";
+    for (let i = start; i < start + n && i < b.length; i++) s += b[i].toString(16).padStart(2, "0").toUpperCase();
+    return s;
+  };
+  const TYPES = { 1:"DISCOVER",2:"HELLO",3:"MATCH",4:"NEGOTIATE",5:"RENEGOTIATE",6:"AUTH",7:"BIND",8:"READ",9:"WRITE",10:"SUBSCRIBE",11:"UNSUB",12:"EVENT",13:"CMD",14:"ACK",15:"DONE",16:"LEASE",17:"PREEMPT",18:"GROUP",19:"HEARTBEAT",20:"OFFLINE",21:"STALE",22:"CONFIG",23:"PROVISION",24:"ERROR",25:"QUERY",26:"REPLY",27:"REPLY_END" };
+  const len = u16(10);
+  let off = 36;
+  const end = Math.min(36 + len, b.length);
+  const tlvs = [];
+  while (off + 6 <= end) {
+    const idx = u16(off), sub = b[off + 2], type = b[off + 3], tl = u16(off + 4);
+    tlvs.push(`  TLV TYPE=0x${type.toString(16).padStart(2, "0")} IDX=${idx} SUB=${sub} LEN=${tl} VAL=${hexAt(off + 6, tl)}`);
+    off += 6 + tl;
+  }
+  const head = `SYNC=A5A5 VER=0x${hexAt(2,1)} FLAGS=0x${hexAt(4,1)} TYPE=${TYPES[b[5]] || b[5]} SEQ=${u16(6)} LEN=${len}`;
+  return [head, tlvs.length ? tlvs.join("\n") : "  （无 TLV）", "HEX " + hex].join("\n");
+}
+
+function renderMonitor() {
+  if (!monOpen) return;
+  const box = document.getElementById("mon-body");
+  const d = live.snapshot;
+  if (!d) { box.innerHTML = '<div class="dim">等待运行数据…</div>'; return; }
+  const m = d.metrics || {};
+
+  if (monTab === "trace") {
+    const rows = (d.trace || []).slice().reverse();
+    box.innerHTML = rows.length ? rows.map(t => `
+      <div class="mon-line">
+        <span class="t">${t.t}</span>
+        <span class="ty">${esc(t.kind)}</span>
+        <span class="f">${esc(t.from || "")}${t.to ? "→" + esc(t.to) : ""}</span>
+        <span>${esc(t.type || "")} ${esc(t.detail || "")}</span>
+      </div>`).join("") : '<div class="dim">暂无事件</div>';
+    return;
+  }
+
+  if (monTab === "frames") {
+    const rows = (d.frames || []).slice().reverse();
+    box.innerHTML = rows.length ? rows.map(f => {
+      const k = `${f.t}-${f.seq}-${f.from}`;
+      return `<div class="mon-frame" data-fk="${k}">
+          <span class="t">${f.t}</span>
+          <span class="ty">${esc(f.type)}</span>
+          <span class="f">${esc(f.from)} → ${esc(f.to)}</span>
+          <span>${f.len}B</span>
+        </div>` + (monExpanded.has(k) ? `<div class="mon-hex">${esc(monDecode(f.hex || ""))}</div>` : "");
+    }).join("") : '<div class="dim">暂无帧</div>';
+    box.querySelectorAll(".mon-frame").forEach(el => {
+      el.onclick = () => {
+        const k = el.dataset.fk;
+        monExpanded.has(k) ? monExpanded.delete(k) : monExpanded.add(k);
+        renderMonitor();
+      };
+    });
+    return;
+  }
+
+  const sum = k => (d.devices || []).reduce((a, x) => a + ((x.counters || {})[k] || 0), 0);
+  const stats = [
+    ["帧发送", m.frames_tx ?? 0], ["帧接收", m.frames_rx ?? 0], ["丢包", m.drops ?? 0],
+    ["平均时延", (m.avg_latency_ms ?? 0).toFixed(2) + "ms"],
+    ["P95 时延", (m.p95_latency_ms ?? 0).toFixed(1) + "ms"],
+    ["吞吐", (m.throughput_kbps ?? 0).toFixed(1) + "k"],
+    ["绑定成功", sum("binds_ok")], ["写拒绝", sum("writes_rejected")], ["查询", sum("queries_sent")]
+  ];
+  const asserts = d.assertions || [];
+  const passed = asserts.filter(a => a.passed).length;
+  box.innerHTML = `
+    <div class="mon-stats">
+      ${stats.map(([k, v]) => `<div class="mon-stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")}
+    </div>
+    <div class="mon-chart">
+      <div class="mct"><span>时延趋势 p50 / p95</span><span>${(m.p50_latency_ms ?? 0).toFixed(1)} / ${(m.p95_latency_ms ?? 0).toFixed(1)} ms</span></div>
+      <canvas id="mon-lat" width="560" height="56"></canvas>
+    </div>
+    <div class="mon-chart">
+      <div class="mct"><span>发送帧速率</span><span>${(monHist.rate[monHist.rate.length - 1] || 0).toFixed(1)} 帧/秒</span></div>
+      <canvas id="mon-rate" width="560" height="56"></canvas>
+    </div>
+    <div class="side-sub">断言 ${passed}/${asserts.length}</div>
+    ${asserts.length ? asserts.map(a => `
+      <div class="side-item" style="cursor:default;border-left-color:${a.passed ? "var(--ok)" : "var(--err)"}">
+        <div class="si-top"><span class="dot ${a.passed ? "ok" : "err"}"></span>
+          <span class="si-name" style="font-weight:500">${esc(a.description)}</span></div>
+        <div class="si-meta">${esc(a.detail || "")}</div>
+      </div>`).join("") : '<div class="dim">该场景未定义断言</div>'}`;
+  monSpark(document.getElementById("mon-lat"), [
+    { color: "#4cc2ff", values: monHist.p50 },
+    { color: "#ffb454", values: monHist.p95 }
+  ]);
+  monSpark(document.getElementById("mon-rate"), [
+    { color: "#3ddc97", values: monHist.rate }
+  ]);
+}
+
+function drawNode(ctx, n) {
+  const d = live.devices[n.name];
+  const st = nodeStatus(n);
+  const sel = selected && selected.kind === "node" && selected.id === n.id;
+  const modeColor = MODE_COLOR[n.mode] || "#4cc2ff";
+
+  ctx.save();
+  if (d && !d.awake) ctx.globalAlpha = 0.55;
+
+  roundRect(ctx, n.x, n.y, NW, NH, 10);
+  ctx.fillStyle = "#121821";
+  ctx.fill();
+  if (d && d.sessions.some(s => s.stage === "active")) {
+    ctx.shadowColor = "rgba(61,220,151,.55)";
+    ctx.shadowBlur = 16;
+  }
+  ctx.strokeStyle = sel ? "#4cc2ff" : (st.color === "#ff5c7a" ? "rgba(255,92,122,.8)" : "#223040");
+  ctx.lineWidth = sel ? 2 : 1;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.save();
+  roundRect(ctx, n.x, n.y, NW, NH, 10);
+  ctx.clip();
+  ctx.fillStyle = modeColor;
+  ctx.fillRect(n.x, n.y, NW, 3);
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.arc(n.x + 15, n.y + 22, 4, 0, Math.PI * 2);
+  ctx.fillStyle = st.color;
+  ctx.fill();
+
+  ctx.font = "600 12px system-ui, 'Microsoft YaHei', sans-serif";
+  ctx.fillStyle = "#e6edf3";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.fillText(clipText(ctx, n.name, NW - 46), n.x + 25, n.y + 22);
+
+  if (d && !d.powered) {
+    ctx.beginPath();
+    ctx.arc(n.x + NW - 13, n.y + 22, 8, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,92,122,.18)";
+    ctx.fill();
+    ctx.strokeStyle = "#ff5c7a";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = "#ff5c7a";
+    ctx.font = "10px system-ui, 'Microsoft YaHei', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("⏻", n.x + NW - 13, n.y + 22);
+    ctx.textAlign = "left";
+  }
+
+  ctx.font = "10px " + "ui-monospace, Consolas, monospace";
+  ctx.fillStyle = "#8b9bb0";
+  ctx.fillText(clipText(ctx, n.did, NW - 74), n.x + 13, n.y + 42);
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = modeColor;
+  ctx.font = "10px system-ui, 'Microsoft YaHei', sans-serif";
+  ctx.fillText((n.relay ? "中继 · " : "") + (MODE_LABEL[n.mode] || n.mode), n.x + NW - 12, n.y + 42);
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#6f8096";
+  ctx.font = "10px system-ui, 'Microsoft YaHei', sans-serif";
+  const sess = d ? d.sessions.length : 0;
+  ctx.fillText("cap " + n.caps.length + " · req " + n.reqs.length + (d ? " · 会话 " + sess : ""), n.x + 13, n.y + 60);
+
+  let line = st.label, color = "#8b9bb0";
+  if (d && d.values.length) {
+    const v = d.values[0];
+    line = v.label + " " + (typeof v.value === "number" ? v.value.toFixed(2) : "—");
+    color = v.stale ? "#ffb454" : "#3ddc97";
+  } else if (d && d.sessions.length) {
+    line = "阶段 " + d.sessions[0].stage;
+    color = "#4cc2ff";
+  }
+  ctx.fillStyle = color;
+  ctx.font = "11px ui-monospace, Consolas, monospace";
+  ctx.fillText(clipText(ctx, line, NW - 26), n.x + 13, n.y + 79);
+
+  const cy = n.y + NH / 2;
+  for (const px of [n.x, n.x + NW]) {
+    ctx.beginPath();
+    ctx.arc(px, cy, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = "#18202b";
+    ctx.fill();
+    ctx.strokeStyle = modeColor;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawLink(ctx, l, a, b, now) {
+  const g = linkGeom(a, b);
+  const m = live.metricsById[l.id];
+  const sel = selected && selected.kind === "link" && selected.id === l.id;
+  const hovered = hover.link === l.id;
+  const down = m && m.partitioned;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(g.p0.x, g.p0.y);
+  ctx.bezierCurveTo(g.c1.x, g.c1.y, g.c2.x, g.c2.y, g.p1.x, g.p1.y);
+  ctx.setLineDash(down ? [7, 5] : []);
+  ctx.lineWidth = sel ? 3 : 2;
+  ctx.strokeStyle = down ? "#ff5c7a" : sel ? "#4cc2ff" : hovered ? "rgba(76,194,255,.85)" : "rgba(76,194,255,.34)";
+  if (sel) { ctx.shadowColor = "rgba(76,194,255,.6)"; ctx.shadowBlur = 10; }
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.shadowBlur = 0;
+
+  for (const p of particles) {
+    if (p.link !== l.id) continue;
+    const t = (now - p.t0) / p.dur;
+    if (t < 0 || t > 1) continue;
+    const pt = p.dir >= 0
+      ? bez(g.p0, g.c1, g.c2, g.p1, t)
+      : bez(g.p1, g.c2, g.c1, g.p0, t);
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = down ? "#ff5c7a" : "#4cc2ff";
+    ctx.shadowColor = down ? "rgba(255,92,122,.9)" : "rgba(76,194,255,.9)";
+    ctx.shadowBlur = 10;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  const mid = bez(g.p0, g.c1, g.c2, g.p1, 0.5);
+  const flash = (flashUntil.get(l.id) || 0) > now;
+  if (flash) {
+    ctx.beginPath();
+    ctx.arc(mid.x, mid.y, 9, 0, Math.PI * 2);
+    ctx.strokeStyle = "#ff5c7a";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  if (cam.k >= 0.55 || sel || hovered) {
+    let text = (MEDIA_PRESETS[l.media] ? MEDIA_PRESETS[l.media].label : l.media) + " · " + l.delay_ms + "ms";
+    if (m && m.frames) text += " · 帧 " + m.frames;
+    if (m && m.dropped) text += " · 丢 " + m.dropped;
+    if (down) text += " · 隔离";
+    ctx.font = "10px ui-monospace, Consolas, monospace";
+    const tw = ctx.measureText(text).width + 12;
+    roundRect(ctx, mid.x - tw / 2, mid.y - 9, tw, 18, 9);
+    ctx.fillStyle = "rgba(11,15,20,.92)";
+    ctx.fill();
+    ctx.strokeStyle = down ? "rgba(255,92,122,.6)" : "rgba(76,194,255,.28)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = down ? "#ff5c7a" : "#9fb2c9";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, mid.x, mid.y + 0.5);
+    ctx.textAlign = "left";
+  }
+  ctx.restore();
+}
+
+function drawConnect(ctx) {
+  const a = drag.from;
+  const fromRight = drag.x >= a.x + NW / 2;
+  const p0 = { x: fromRight ? a.x + NW : a.x, y: a.y + NH / 2 };
+  const p1 = { x: drag.x, y: drag.y };
+  const off = Math.max(40, Math.abs(p1.x - p0.x) * 0.4);
+  ctx.save();
+  ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = "#4cc2ff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(p0.x, p0.y);
+  ctx.bezierCurveTo(p0.x + off, p0.y, p1.x - off, p1.y, p1.x, p1.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  const target = hover.node && hover.node.id !== a.id ? hover.node : null;
+  if (target) {
+    ctx.strokeStyle = "#3ddc97";
+    ctx.lineWidth = 2;
+    roundRect(ctx, target.x - 2, target.y - 2, NW + 4, NH + 4, 12);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawGrid(ctx, w, h) {
+  ctx.fillStyle = "#0b0f14";
+  ctx.fillRect(0, 0, w, h);
+  const step = 32 * cam.k;
+  if (step < 11) return;
+  const ox = ((cam.x % step) + step) % step;
+  const oy = ((cam.y % step) + step) % step;
+  ctx.fillStyle = "rgba(139,155,176,.15)";
+  for (let x = ox; x < w; x += step) {
+    for (let y = oy; y < h; y += step) {
+      ctx.fillRect(x, y, 1.3, 1.3);
+    }
+  }
+}
+
+function draw() {
+  const now = performance.now();
+  particles = particles.filter(p => now - p.t0 <= p.dur);
+  const size = fitCanvas();
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawGrid(ctx, size.w, size.h);
+  ctx.save();
+  ctx.translate(cam.x, cam.y);
+  ctx.scale(cam.k, cam.k);
+  ctx.textBaseline = "middle";
+  for (const l of G.links) {
+    const a = nodeById(l.a), b = nodeById(l.b);
+    if (a && b) drawLink(ctx, l, a, b, now);
+  }
+  if (drag && drag.mode === "connect") drawConnect(ctx);
+  for (const n of G.nodes) drawNode(ctx, n);
+  ctx.restore();
+  requestAnimationFrame(draw);
+}
+
+/* ---------- 检视器 ---------- */
+
+function renderInspector() {
+  const box = $("#inspector");
+  if (selected && selected.kind === "node" && !nodeById(selected.id)) selected = null;
+  if (selected && selected.kind === "link" && !linkById(selected.id)) selected = null;
+
+  if (!selected) {
+    box.innerHTML = scenarioHtml();
+    bindScenario();
+  } else if (selected.kind === "node") {
+    const n = nodeById(selected.id);
+    box.innerHTML = nodeHtml(n);
+    bindNode(n);
+  } else {
+    const l = linkById(selected.id);
+    const a = nodeById(l.a), b = nodeById(l.b);
+    box.innerHTML = linkHtml(l, a, b);
+    bindLink(l);
+  }
+  updateLiveBox();
+  renderSidePanels();
+}
+
+function scenarioHtml() {
+  return `
+    <h2 class="insp-title">场景设置</h2>
+    <div class="grid2">
+      <label class="field" style="grid-column:1 / -1">场景名称
+        <input data-sc="name" value="${esc(G.name)}">
+      </label>
+      <label class="field">时长 ms
+        <input data-sc="duration_ms" type="number" value="${G.duration_ms}">
+      </label>
+      <label class="field">随机种子
+        <input data-sc="seed" type="number" value="${G.seed}">
+      </label>
+      <label class="field">最大跳数
+        <input data-sc="max_hops" type="number" min="1" max="32" value="${G.max_hops}">
+      </label>
+    </div>
+    <label class="field" style="flex-direction:row;align-items:center;gap:8px;margin-top:10px">
+      <input data-sc="require_link" type="checkbox" ${G.require_link ? "checked" : ""} style="width:auto">
+      仅显式连线可通信
+    </label>
+    <p class="dim" style="margin-top:8px">
+      勾选后，两台设备之间必须手动连线才能收发帧；关掉则未连线设备使用场景默认链路。
+    </p>
+    <div class="insp-sec">
+      <h3>当前拓扑</h3>
+      <div class="live-row"><span>设备</span><b>${G.nodes.length}</b></div>
+      <div class="live-row"><span>连线</span><b>${G.links.length}</b></div>
+      <div class="live-row"><span>能力点</span><b>${G.nodes.reduce((a, n) => a + n.caps.length, 0)}</b></div>
+      <div class="live-row"><span>需求点</span><b>${G.nodes.reduce((a, n) => a + n.reqs.length, 0)}</b></div>
+    </div>
+    <div class="insp-sec">
+      <h3>操作说明</h3>
+      <p class="dim">
+        从元件库点击添加设备。拖动设备两侧的圆点到另一台设备建立连线。
+        选中设备或连线后可在此配置能力点、需求、介质、时延、丢包和带宽。
+        改动后点击顶部「构建并运行」让仿真从 0 时刻按新拓扑重新开始。
+      </p>
+    </div>`;
+}
+
+function bindScenario() {
+  const box = $("#inspector");
+  box.querySelectorAll("[data-sc]").forEach(el => {
+    const f = el.dataset.sc;
+    el.addEventListener(el.type === "checkbox" ? "change" : "input", () => {
+      if (el.type === "checkbox") G[f] = el.checked;
+      else if (el.type === "number") G[f] = parseFloat(el.value || "0") || 0;
+      else G[f] = el.value;
+      if (f === "require_link") updateHint();
+      markDirty();
+    });
+  });
+}
+
+function nodeHtml(n) {
+  const ld = live.devices[n.name];
+  const powered = !ld || ld.powered;
+  const awake = !ld || ld.awake;
+  const rxOn = !ld || ld.rx_on;
+  const capCards = n.caps.map((c, i) => `
+    <div class="item" data-i="${i}">
+      <div class="item-top">
+        <span class="mono">能力点 #${c.index}.${c.sub}</span>
+        <button data-del="1" class="danger">删除</button>
+      </div>
+      <div class="grid2">
+        <label class="field" style="grid-column:1 / -1">名称<input data-f="label" value="${esc(c.label)}"></label>
+        <label class="field">量种<select data-f="qty">${qtyOptions(c.qty)}</select></label>
+        <label class="field">单位<input data-f="unit" value="${esc(c.unit)}"></label>
+        <label class="field">数据类型<select data-f="dtype">${dtypeOptions(c.dtype)}</select></label>
+        <label class="field">读写方向
+          <select data-f="dir">
+            <option value="1"${+c.dir === 1 ? " selected" : ""}>只读</option>
+            <option value="2"${+c.dir === 2 ? " selected" : ""}>只写</option>
+            <option value="3"${+c.dir === 3 ? " selected" : ""}>读写</option>
+          </select>
+        </label>
+        <label class="field">量程下限<input data-f="range_lo" type="number" value="${c.range ? c.range[0] : 0}"></label>
+        <label class="field">量程上限<input data-f="range_hi" type="number" value="${c.range ? c.range[1] : 100}"></label>
+        <label class="field">点号<input data-f="index" type="number" value="${c.index}"></label>
+        <label class="field">子号<input data-f="sub" type="number" value="${c.sub}"></label>
+        <label class="field">生产周期 ms<input data-f="t_prod_ms" type="number" value="${c.t_prod_ms}"></label>
+        <label class="field">过期 ms<input data-f="stale_ms" type="number" value="${c.stale_ms}"></label>
+      </div>
+    </div>`).join("");
+
+  const reqCards = n.reqs.map((r, i) => `
+    <div class="item" data-i="${i}">
+      <div class="item-top">
+        <span>需求点</span>
+        <button data-del="1" class="danger">删除</button>
+      </div>
+      <div class="grid2">
+        <label class="field" style="grid-column:1 / -1">名称<input data-f="label" value="${esc(r.label)}"></label>
+        <label class="field">量种<select data-f="qty">${qtyOptions(r.qty)}</select></label>
+        <label class="field">单位<input data-f="unit" value="${esc(r.unit)}"></label>
+        <label class="field">期望周期 ms<input data-f="want_ms" type="number" value="${r.want_ms}"></label>
+        <label class="field">过期 ms<input data-f="stale_ms" type="number" value="${r.stale_ms}"></label>
+      </div>
+    </div>`).join("");
+
+  const valCards = n.values.map((v, i) => `
+    <div class="item" data-i="${i}">
+      <div class="item-top">
+        <span class="mono">模拟量 #${v.index}.${v.sub}</span>
+        <button data-del="1" class="danger">删除</button>
+      </div>
+      <div class="grid2">
+        <label class="field">点号<input data-f="index" type="number" value="${v.index}"></label>
+        <label class="field">子号<input data-f="sub" type="number" value="${v.sub}"></label>
+        <label class="field">基准值<input data-f="base" type="number" step="0.1" value="${v.base}"></label>
+        <label class="field">幅度<input data-f="amplitude" type="number" step="0.1" value="${v.amplitude}"></label>
+        <label class="field">周期 ms<input data-f="period_ms" type="number" value="${v.period_ms}"></label>
+        <label class="field">噪声<input data-f="noise" type="number" step="0.01" value="${v.noise}"></label>
+      </div>
+    </div>`).join("");
+
+  const logicCards = n.logic.map((r, i) => `
+    <div class="item" data-i="${i}">
+      <div class="item-top">
+        <span>规则 ${i + 1}</span>
+        <button data-del="1" class="danger">删除</button>
+      </div>
+      <div class="grid2">
+        <label class="field" style="grid-column:1 / -1">名称<input data-f="name" value="${esc(r.name)}"></label>
+        <label class="field">类型
+          <select data-f="kind">
+            <option value="threshold"${r.kind === "threshold" ? " selected" : ""}>阈值联动</option>
+            <option value="aggregate"${r.kind === "aggregate" ? " selected" : ""}>聚合计算</option>
+          </select>
+        </label>
+        <label class="field">输入点（如 1.0,2.0）<input data-f="sources" value="${esc(r.sources)}"></label>
+        <label class="field">输出点<input data-f="output" value="${esc(r.output)}"></label>
+        <label class="field">目标设备（空=本地）<input data-f="target" value="${esc(r.target)}"></label>
+        <label class="field">聚合方式<select data-f="agg">${aggOptions(r.agg)}</select></label>
+        <label class="field">比较<select data-f="op">${opOptions(r.op)}</select></label>
+        <label class="field">阈值<input data-f="threshold" type="number" step="0.1" value="${r.threshold}"></label>
+        <label class="field">成立写入<input data-f="on" type="number" step="0.1" value="${r.on}"></label>
+        <label class="field">不成立写入<input data-f="off" type="number" step="0.1" value="${r.off}"></label>
+        <label class="field">最小间隔 ms<input data-f="min_interval_ms" type="number" value="${r.min_interval_ms}"></label>
+      </div>
+    </div>`).join("");
+
+  return `
+    <div class="power-card ${powered ? "" : "off"}" id="power-card">
+      <div class="pc-head">
+        <div class="pc-ico">⏻</div>
+        <div>
+          <div class="pc-label">设备电源</div>
+          <div class="pc-state" id="pc-state">${powered ? "运行中" : "已断电"}</div>
+        </div>
+        <button class="big-switch ${powered ? "" : "off"}" id="power-toggle" title="${powered ? "断电" : "上电"}"></button>
+      </div>
+      <div class="quick-actions">
+        <button data-quick="${awake ? "sleep" : "wake"}" ${powered ? "" : "disabled"}>${awake ? "休眠" : "唤醒"}</button>
+        <button data-quick="${rxOn ? "rx_off" : "rx_on"}" ${powered ? "" : "disabled"}>${rxOn ? "关闭接收" : "开启接收"}</button>
+      </div>
+    </div>
+    <h2 class="insp-title">设备属性</h2>
+    <div class="grid2">
+      <label class="field" style="grid-column:1 / -1">名称
+        <input id="nd-name" value="${esc(n.name)}">
+      </label>
+      <label class="field" style="grid-column:1 / -1">DID
+        <input id="nd-did" class="mono" value="${esc(n.did)}">
+      </label>
+      <label class="field">角色
+        <select id="nd-mode">
+          <option value="provider"${n.mode === "provider" ? " selected" : ""}>提供者</option>
+          <option value="consumer"${n.mode === "consumer" ? " selected" : ""}>消费者</option>
+          <option value="both"${n.mode === "both" ? " selected" : ""}>双向</option>
+        </select>
+      </label>
+      <label class="field">协议档
+        <select id="nd-prof">
+          <option value="0"${+n.prof !== 1 ? " selected" : ""}>STD（标准）</option>
+          <option value="1"${+n.prof === 1 ? " selected" : ""}>RT（实时）</option>
+        </select>
+      </label>
+      <label class="field">分组
+        <input id="nd-group" type="number" value="${n.group}">
+      </label>
+      <label class="field">启动延迟 ms
+        <input id="nd-start" type="number" value="${n.start_ms}">
+      </label>
+      <label class="field" style="grid-column:1 / -1">网关中继
+        <span style="display:flex;align-items:center;gap:8px">
+          <input id="nd-relay" type="checkbox" style="width:auto"${n.relay ? " checked" : ""}>
+          <span class="dim">允许转发其它设备的帧（多跳网关）</span>
+        </span>
+      </label>
+    </div>
+    <div class="insp-sec">
+      <h3>能力点 <button data-add="caps">+ 添加</button></h3>
+      <div data-list="caps">${capCards || '<div class="dim">暂无能力点</div>'}</div>
+    </div>
+    <div class="insp-sec">
+      <h3>需求点 <button data-add="reqs">+ 添加</button></h3>
+      <div data-list="reqs">${reqCards || '<div class="dim">暂无需求点</div>'}</div>
+    </div>
+    <div class="insp-sec">
+      <h3>模拟量 <button data-add="values">+ 添加</button></h3>
+      <div data-list="values">${valCards || '<div class="dim">暂无模拟量</div>'}</div>
+    </div>
+    <div class="insp-sec">
+      <h3>设备行为（计算 / 数据使用） <button data-add="logic">+ 添加</button></h3>
+      <div data-list="logic">${logicCards || '<div class="dim">暂无规则：可配置阈值联动或聚合计算</div>'}</div>
+    </div>
+    <div class="insp-sec">
+      <div class="row-btns">
+        <button class="danger" id="del-node">删除设备</button>
+      </div>
+    </div>
+    <div class="insp-sec">
+      <h3>实时状态</h3>
+      <div id="live-box"></div>
+    </div>`;
+}
+
+function bindNode(n) {
+  const box = $("#inspector");
+  const powerBtn = box.querySelector("#power-toggle");
+  if (powerBtn) {
+    powerBtn.onclick = () => {
+      const d = live.devices[n.name];
+      postFault({ kind: d && d.powered ? "power_off" : "power_on", device: n.name });
+    };
+  }
+  box.querySelectorAll("[data-quick]").forEach(btn => {
+    btn.onclick = () => postFault({ kind: btn.dataset.quick, device: n.name });
+  });
+  const nameEl = box.querySelector("#nd-name");
+  nameEl.addEventListener("change", () => {
+    const v = nameEl.value.trim();
+    if (!v) { nameEl.value = n.name; return; }
+    if (G.nodes.some(x => x.id !== n.id && x.name === v)) {
+      alert("设备名称已存在");
+      nameEl.value = n.name;
+      return;
+    }
+    n.name = v;
+    markDirty();
+  });
+  box.querySelector("#nd-did").addEventListener("change", e => {
+    n.did = e.target.value.trim();
+    markDirty();
+  });
+  box.querySelector("#nd-mode").addEventListener("change", e => {
+    n.mode = e.target.value;
+    markDirty();
+  });
+  box.querySelector("#nd-prof").addEventListener("change", e => {
+    n.prof = parseInt(e.target.value || "0", 10) === 1 ? 1 : 0;
+    markDirty();
+    renderInspector();
+  });
+  box.querySelector("#nd-group").addEventListener("input", e => {
+    n.group = parseInt(e.target.value || "0", 10) || 0;
+    markDirty();
+  });
+  box.querySelector("#nd-start").addEventListener("input", e => {
+    n.start_ms = parseInt(e.target.value || "0", 10) || 0;
+    markDirty();
+  });
+  box.querySelector("#nd-relay").addEventListener("change", e => {
+    n.relay = e.target.checked;
+    markDirty();
+  });
+
+  bindList(box, n, "caps");
+  bindList(box, n, "reqs");
+  bindList(box, n, "values");
+  bindList(box, n, "logic");
+
+  box.querySelectorAll("[data-add]").forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.add;
+      n[key].push(newListItem(n, key));
+      markDirty();
+      renderInspector();
+    };
+  });
+
+  box.querySelector("#del-node").onclick = () => removeNode(n.id);
+}
+
+function newListItem(n, key) {
+  if (key === "caps") {
+    const idx = n.caps.reduce((m, c) => Math.max(m, +c.index || 0), 0) + 1;
+    return {
+      index: idx, sub: 0, label: "能力点", qty: "ratio", unit: "", dtype: "f64",
+      dir: 1, scale: 0, range: [0, 100], t_prod_ms: 100, stale_ms: 1000
+    };
+  }
+  if (key === "reqs") {
+    return { label: "需求", qty: "ratio", unit: "", want_ms: 100, stale_ms: 1000 };
+  }
+  if (key === "values") {
+    const idx = n.caps.length ? +n.caps[0].index || 1 : 1;
+    return { index: idx, sub: 0, base: 0, amplitude: 1, period_ms: 5000, noise: 0 };
+  }
+  return {
+    name: "规则", kind: "threshold", sources: "1.0", op: ">=", threshold: 0,
+    threshold2: 0, on: 1, off: 0, agg: "avg", target: "", output: "1.0", min_interval_ms: 0
+  };
+}
+
+function bindList(box, node, key) {
+  const listEl = box.querySelector('[data-list="' + key + '"]');
+  if (!listEl) return;
+  listEl.querySelectorAll("[data-i]").forEach(itemEl => {
+    const i = +itemEl.dataset.i;
+    itemEl.querySelectorAll("[data-f]").forEach(inp => {
+      const f = inp.dataset.f;
+      const evt = inp.tagName === "SELECT" ? "change" : "input";
+      inp.addEventListener(evt, () => {
+        if (key === "caps" && (f === "range_lo" || f === "range_hi")) {
+          const cur = node.caps[i].range ? node.caps[i].range.slice() : [0, 100];
+          const n = parseFloat(inp.value || "0") || 0;
+          if (f === "range_lo") cur[0] = n;
+          else cur[1] = n;
+          node.caps[i].range = cur;
+          markDirty();
+          return;
+        }
+        if (inp.type === "number") node[key][i][f] = parseFloat(inp.value || "0") || 0;
+        else node[key][i][f] = inp.value;
+        markDirty();
+      });
+    });
+    const del = itemEl.querySelector("[data-del]");
+    if (del) del.onclick = () => {
+      node[key].splice(i, 1);
+      markDirty();
+      renderInspector();
+    };
+  });
+}
+
+function linkHtml(l, a, b) {
+  const mediaOpts = Object.keys(MEDIA_PRESETS).map(m =>
+    `<option value="${m}"${l.media === m ? " selected" : ""}>${MEDIA_PRESETS[m].label}（${m}）</option>`).join("");
+  const topoOpts = TOPOLOGY_OPTIONS.map(t =>
+    `<option value="${t}"${l.topology === t ? " selected" : ""}>${t}</option>`).join("");
+  return `
+    <h2 class="insp-title">链路属性</h2>
+    <div class="pair"><b>${esc(a.name)}</b><span>⇄</span><b>${esc(b.name)}</b></div>
+    <div class="grid2">
+      <label class="field">介质
+        <select data-f="media">${mediaOpts}</select>
+      </label>
+      <label class="field">拓扑
+        <select data-f="topology">${topoOpts}</select>
+      </label>
+      <label class="field">时延 ms
+        <input data-f="delay_ms" type="number" value="${l.delay_ms}">
+      </label>
+      <label class="field">抖动 ms
+        <input data-f="jitter_ms" type="number" value="${l.jitter_ms}">
+      </label>
+      <label class="field">丢包 %
+        <input data-f="loss_ppm" data-pct="1" type="number" step="0.01" value="${(l.loss_ppm / 10000).toFixed(3)}">
+      </label>
+      <label class="field">重复 %
+        <input data-f="dup_ppm" data-pct="1" type="number" step="0.01" value="${(l.dup_ppm / 10000).toFixed(3)}">
+      </label>
+      <label class="field">乱序 %
+        <input data-f="reorder_ppm" data-pct="1" type="number" step="0.01" value="${(l.reorder_ppm / 10000).toFixed(3)}">
+      </label>
+      <label class="field">MTU（0 不限）
+        <input data-f="mtu" type="number" value="${l.mtu}">
+      </label>
+      <label class="field">波特率 / 位速率
+        <input data-f="baud" type="number" step="100" value="${l.baud || 0}">
+      </label>
+      <label class="field">上行 kbps（0 不限）
+        <input data-f="uplink_kbps" type="number" value="${l.uplink_kbps}">
+      </label>
+      <label class="field">下行 kbps（0 不限）
+        <input data-f="downlink_kbps" type="number" value="${l.downlink_kbps}">
+      </label>
+      <label class="field">最小链路周期 ms
+        <input data-f="t_link_min_ms" type="number" value="${l.t_link_min_ms}">
+      </label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:6px;padding-top:14px">
+        <input data-f="host_proxy" type="checkbox" ${l.host_proxy ? "checked" : ""} style="width:auto">主机代发
+      </label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:6px;padding-top:14px">
+        <input data-f="segment" type="checkbox" ${l.segment ? "checked" : ""} style="width:auto">适配层分段
+      </label>
+    </div>
+    <div class="dim" style="margin-top:8px">
+      ${(MEDIA_PRESETS[l.media] || {}).class || "—"} ·
+      ${l.segment ? "适配层分段/重组，按整帧语义传递" : "单帧直通"}
+      ${l.mtu ? " · 物理帧上限 " + l.mtu + "B" : " · 不限帧长"}
+      ${l.baud ? " · " + l.baud + " bps ≈ " + (l.media === "uart" || l.media === "rs485" ? Math.max(1, Math.round(l.baud * 0.8 / 1000)) + " kbps" : "总线位速率") : ""}
+    </div>
+    <div class="insp-sec">
+      <div class="row-btns">
+        <button id="live-partition">切换隔离状态</button>
+        <button class="danger" id="del-link">删除连线</button>
+      </div>
+    </div>
+    <div class="insp-sec">
+      <h3>实时状态</h3>
+      <div id="live-box"></div>
+    </div>`;
+}
+
+function bindLink(l) {
+  const box = $("#inspector");
+  box.querySelectorAll("[data-f]").forEach(el => {
+    const f = el.dataset.f;
+    const evt = el.tagName === "SELECT" || el.type === "checkbox" ? "change" : "input";
+    el.addEventListener(evt, () => {
+      if (f === "media") {
+        const preset = MEDIA_PRESETS[el.value] || MEDIA_PRESETS.loopback;
+        Object.assign(l, preset, { media: el.value });
+        markDirty();
+        renderInspector();
+        return;
+      }
+      if (f === "baud") {
+        l.baud = parseFloat(el.value || "0") || 0;
+        if (l.media === "uart" || l.media === "rs485") {
+          const k = Math.max(1, Math.round(l.baud * 0.8 / 1000));
+          l.uplink_kbps = k;
+          l.downlink_kbps = k;
+        }
+        markDirty();
+        renderInspector();
+        return;
+      }
+      if (el.type === "checkbox") l[f] = el.checked;
+      else if (el.dataset.pct) l[f] = Math.round((parseFloat(el.value || "0") || 0) * 10000);
+      else if (el.type === "number") l[f] = parseFloat(el.value || "0") || 0;
+      else l[f] = el.value;
+      markDirty();
+    });
+  });
+  box.querySelector("#del-link").onclick = () => removeLink(l.id);
+  box.querySelector("#live-partition").onclick = () => {
+    const a = nodeById(l.a), b = nodeById(l.b);
+    if (!a || !b) return;
+    const m = live.metricsById[l.id];
+    postFault({
+      kind: m && m.partitioned ? "heal" : "partition",
+      a: a.name, b: b.name
+    });
+  };
+}
+
+function updatePowerCard() {
+  const card = document.getElementById("power-card");
+  if (!card || !selected || selected.kind !== "node") return;
+  const n = nodeById(selected.id);
+  if (!n) return;
+  const d = live.devices[n.name];
+  const powered = !d || d.powered;
+  const awake = !d || d.awake;
+  const rxOn = !d || d.rx_on;
+  card.classList.toggle("off", !powered);
+  const st = document.getElementById("pc-state");
+  if (st) st.textContent = powered ? "运行中" : "已断电";
+  const sw = document.getElementById("power-toggle");
+  if (sw) {
+    sw.classList.toggle("off", !powered);
+    sw.title = powered ? "断电" : "上电";
+  }
+  const qs = card.querySelectorAll("[data-quick]");
+  if (qs[0]) {
+    qs[0].dataset.quick = awake ? "sleep" : "wake";
+    qs[0].textContent = awake ? "休眠" : "唤醒";
+    qs[0].disabled = !powered;
+  }
+  if (qs[1]) {
+    qs[1].dataset.quick = rxOn ? "rx_off" : "rx_on";
+    qs[1].textContent = rxOn ? "关闭接收" : "开启接收";
+    qs[1].disabled = !powered;
+  }
+}
+
+function updateLiveBox() {
+  const box = document.getElementById("live-box");
+  if (!box || !selected) return;
+  if (selected.kind === "node") {
+    const n = nodeById(selected.id);
+    if (!n) return;
+    const d = live.devices[n.name];
+    if (!d) {
+      box.innerHTML = '<div class="dim">该设备尚未出现在运行快照中，点击「构建并运行」应用拓扑。</div>';
+      return;
+    }
+    const sess = d.sessions.length ? d.sessions.map(s => `
+      <div class="live-sess">
+        <span class="peer">${esc(s.peer)}</span>
+        <span class="st">${esc(s.stage)}</span>
+        <div class="dim">${esc(s.role)}${s.stale ? " · 已过期" : ""}${s.error ? " · " + esc(s.error) : ""}</div>
+      </div>`).join("") : '<div class="dim">暂无会话</div>';
+    const vals = d.values.length ? d.values.map(v => `
+      <div class="live-val ${v.stale ? "stale" : ""}">
+        <span>${esc(v.label || (v.index + "/" + v.sub))}</span>
+        <span class="n">${typeof v.value === "number" ? v.value.toFixed(3) : "—"}</span>
+      </div>`).join("") : "";
+    const status = !d.powered ? "已断电"
+      : !d.awake ? "休眠"
+      : !d.rx_on ? "RX 关"
+      : d.publishing ? "发布中" : "停发";
+    box.innerHTML = `
+      <div class="live-row"><span>电源</span>
+        <button class="si-power ${d.powered ? "" : "off"}" data-live-power="${esc(n.name)}">${d.powered ? "断电" : "上电"}</button>
+      </div>
+      <div class="live-row"><span>presence</span><b>${d.presence}</b></div>
+      <div class="live-row"><span>状态</span><b>${status}</b></div>
+      <div class="live-row"><span>帧 tx / rx</span><b>${d.counters.tx} / ${d.counters.rx}</b></div>
+      ${sess}
+      ${vals}`;
+    box.querySelectorAll("[data-live-power]").forEach(btn => {
+      btn.onclick = () => postFault({
+        kind: d.powered ? "power_off" : "power_on",
+        device: btn.dataset.livePower
+      });
+    });
+  } else {
+    const l = linkById(selected.id);
+    if (!l) return;
+    const m = live.metricsById[l.id];
+    if (!m) {
+      box.innerHTML = '<div class="dim">该链路尚未出现在运行快照中，点击「构建并运行」应用拓扑。</div>';
+      return;
+    }
+    box.innerHTML = `
+      <div class="live-row"><span>状态</span><b>${m.partitioned ? "已隔离" : "正常"}</b></div>
+      <div class="live-row"><span>帧数</span><b>${m.frames}</b></div>
+      <div class="live-row"><span>丢弃</span><b>${m.dropped}</b></div>
+      <div class="live-row"><span>介质 / 拓扑</span><b>${esc(m.media)} / ${esc(m.topology)}</b></div>`;
+  }
+}
+
+/* ---------- 顶栏与联调 ---------- */
+
+function updateTopbar() {
+  const pill = $("#conn-pill");
+  if (!live.connected) {
+    pill.textContent = "重连中";
+    pill.className = "pill pause";
+  } else if (live.final) {
+    pill.textContent = "已完成";
+    pill.className = "pill done";
+  } else if (live.paused) {
+    pill.textContent = "已暂停";
+    pill.className = "pill pause";
+  } else {
+    pill.textContent = "运行中";
+    pill.className = "pill run";
+  }
+  const fmt = ms => (ms / 1000).toFixed(1) + "s";
+  $("#clock").textContent = fmt(live.now) + " / " + fmt(live.duration);
+  $("#dirty-chip").style.display = dirty ? "" : "none";
+  $("#btn-pause").textContent = live.paused ? "继续" : "暂停";
+  $("#btn-run").classList.toggle("primary", dirty);
+}
+
+function updateHint() {
+  $("#hint").textContent = G.require_link
+    ? "强制连线模式：只有手动连线的设备之间才能通信"
+    : "默认链路模式：未连线设备按场景默认链路通信";
+}
+
+async function control(cmd, extra) {
+  try {
+    const r = await fetch("/api/control", {
+      method: "POST",
+      body: JSON.stringify(Object.assign({ cmd }, extra || {}))
+    });
+    const j = await r.json();
+    if (!j.ok) alert(j.msg);
+  } catch (e) { /* 断线时静默 */ }
+}
+
+async function postFault(obj) {
+  try {
+    const r = await fetch("/api/fault", { method: "POST", body: JSON.stringify(obj) });
+    const j = await r.json();
+    if (!j.ok) alert(j.msg);
+  } catch (e) { /* 断线时静默 */ }
+}
+
+/* ---------- 元件库与示例 ---------- */
+
+function renderPalette() {
+  const box = $("#pal-list");
+  box.innerHTML = ARCHETYPES.map(a => {
+    const color = MODE_COLOR[a.mode] || "#4cc2ff";
+    const parts = [];
+    if (a.caps.length) parts.push(a.caps.length + " 能力点");
+    if (a.reqs.length) parts.push(a.reqs.length + " 需求点");
+    if (a.values.length) parts.push(a.values.length + " 模拟量");
+    if (a.logic && a.logic.length) parts.push(a.logic.length + " 规则");
+    const meta = MODE_LABEL[a.mode] + " · " + (parts.length ? parts.join(" · ") : "空白 · 自由配置");
+    return `<button class="pal" data-arch="${a.key}">
+        <span class="bar" style="background:${color}"></span>
+        <span class="txt"><span class="nm">${esc(a.label)}</span><span class="mt">${meta}</span></span>
+      </button>`;
+  }).join("");
+  box.querySelectorAll("[data-arch]").forEach(btn => {
+    btn.onclick = () => {
+      const arch = ARCHETYPES.find(a => a.key === btn.dataset.arch);
+      if (!arch) return;
+      const cx = (wrap.clientWidth / 2 - cam.x) / cam.k - NW / 2;
+      const cy = (wrap.clientHeight / 2 - cam.y) / cam.k - NH / 2;
+      const offset = (G.nodes.length % 5) * 22;
+      addNode(arch, Math.round(cx + offset), Math.round(cy + offset));
+    };
+  });
+}
+
+function buildDemo() {
+  G = {
+    name: "画布示例：三路采集", duration_ms: 12000, seed: 42, require_link: true,
+    nodes: [], links: [], faults: [], asserts: [], key: null, tick_ms: 0
+  };
+  const temp = mkNode(ARCHETYPES.find(a => a.key === "temp"), 60, 70);
+  const hvac = mkNode(ARCHETYPES.find(a => a.key === "hvac"), 400, 70);
+  const hum = mkNode(ARCHETYPES.find(a => a.key === "humidity"), 60, 220);
+  const gw = mkNode(ARCHETYPES.find(a => a.key === "gateway"), 400, 220);
+  const pres = mkNode(ARCHETYPES.find(a => a.key === "pressure"), 60, 370);
+  const disp = mkNode(ARCHETYPES.find(a => a.key === "display"), 400, 370);
+  G.nodes.push(temp, hvac, hum, gw, pres, disp);
+  function wire(a, b, media) {
+    const preset = MEDIA_PRESETS[media];
+    G.links.push(Object.assign({ id: "l" + lid++, a: a.id, b: b.id, media }, preset));
+  }
+  wire(temp, hvac, "wifi");
+  wire(hum, gw, "ble");
+  wire(pres, disp, "uart");
+  selected = null;
+  dirty = true;
+  updateHint();
+}
+
+/* ---------- 启动 ---------- */
+
+document.querySelectorAll("#rail button").forEach(b => {
+  b.onclick = () => setTab(b.dataset.tab);
+});
+
+$("#btn-monitor").onclick = () => toggleMonitor();
+$("#mon-close").onclick = () => toggleMonitor(false);
+document.querySelectorAll(".mon-tabs button").forEach(b => {
+  b.onclick = () => setMonTab(b.dataset.mon);
+});
+
+$("#btn-run").onclick = async () => { await applyTopology(false); };
+$("#btn-pause").onclick = () => control("toggle");
+$("#btn-step").onclick = () => { control("step"); resetLive(); };
+$("#btn-reset").onclick = () => { control("reset"); resetLive(); };
+$("#speed").onchange = e => control("speed", { value: parseFloat(e.target.value) });
+
+$("#btn-demo").onclick = async () => {
+  buildDemo();
+  fitView();
+  renderInspector();
+  await applyTopology(false);
+};
+
+$("#btn-import").onclick = () => $("#file").click();
+$("#file").onchange = e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const obj = JSON.parse(reader.result);
+      if (!Array.isArray(obj.devices) || obj.devices.length === 0) {
+        alert("场景 JSON 缺少 devices 数组");
+        return;
+      }
+      loadScenario(obj);
+      fitView();
+      renderInspector();
+      await applyTopology(false);
+    } catch (err) {
+      alert("导入失败：" + err.message);
+    }
+  };
+  reader.readAsText(f);
+  e.target.value = "";
+};
+
+$("#btn-export").onclick = () => {
+  const blob = new Blob([JSON.stringify(buildScenario(), null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (G.name || "topology") + ".json";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
+$("#btn-clear").onclick = () => {
+  if (!confirm("清空画布上的所有设备与连线？")) return;
+  G.nodes = [];
+  G.links = [];
+  selected = null;
+  markDirty();
+  renderInspector();
+};
+
+async function boot() {
+  renderPalette();
+  let obj = null;
+  try {
+    const r = await fetch("/api/scenario");
+    if (r.ok) obj = await r.json();
+  } catch (e) { /* 服务不可用时走示例 */ }
+
+  if (obj && Array.isArray(obj.devices) && obj.devices.length) {
+    loadScenario(obj);
+  } else {
+    buildDemo();
+  }
+  renderInspector();
+  requestAnimationFrame(() => { fitView(); updateHint(); });
+  connectLive();
+  await applyTopology(true);
+  renderSidePanels();
+  booted = true;
+}
+
+requestAnimationFrame(draw);
+boot();
+</script>
+</body>
+</html>

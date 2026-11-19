@@ -1,0 +1,18 @@
+{
+  "name": "协议拒绝：未知帧类型与未支持标志",
+  "duration_ms": 2000,
+  "seed": 31,
+  "key": "idcell-lab-key",
+  "devices": [
+    { "name": "dev-a", "did": "00000000-00000081", "mode": "both" },
+    { "name": "dev-b", "did": "00000000-00000082", "mode": "both" }
+  ],
+  "faults": [
+    { "at_ms": 400, "kind": "raw_frame", "device": "dev-b", "peer": "dev-a", "frame_type": 119, "flags": 0 },
+    { "at_ms": 800, "kind": "raw_frame", "device": "dev-b", "peer": "dev-a", "frame_type": 12, "flags": 1 }
+  ],
+  "asserts": [
+    { "kind": "proto_rejects", "op": ">=", "value": 2, "description": "未知类型与未支持标志均被拒绝" },
+    { "kind": "frame", "frame": "ERROR", "op": ">=", "value": 2, "description": "每类拒绝都返回结构化 ERROR" }
+  ]
+}

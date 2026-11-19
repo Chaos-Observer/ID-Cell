@@ -1,0 +1,46 @@
+{
+  "name": "窄带 BLE：128 kbps 链路下的周期发布",
+  "duration_ms": 6000,
+  "seed": 11,
+  "key": "idcell-lab-key",
+  "link": {
+    "media": "ble",
+    "topology": "p2p"
+  },
+  "devices": [
+    {
+      "name": "sensor-ble",
+      "did": "00000000-00000021",
+      "link_min_ms": 20,
+      "caps": [
+        {
+          "index": 1,
+          "sub": 0,
+          "label": "心率",
+          "qty": "frequency",
+          "unit": "Hz",
+          "t_prod_ms": 200,
+          "stale_ms": 2000
+        }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 72.0, "amplitude": 8.0, "period_ms": 3000, "noise": 0.3 }
+      ]
+    },
+    {
+      "name": "app-ble",
+      "did": "00000000-00000022",
+      "link_min_ms": 20,
+      "reqs": [
+        { "qty": "frequency", "unit": "Hz", "want_ms": 100, "stale_ms": 2000 }
+      ]
+    }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "app-ble", "peer": "sensor-ble", "stage": "active", "description": "BLE 窄带链路完成绑定" },
+    { "kind": "bound", "description": "至少一次绑定成功" },
+    { "kind": "events_rx", "op": ">=", "value": 10, "description": "受带宽限制仍有事件到达" },
+    { "kind": "frames_tx", "op": ">=", "value": 40, "description": "双向控制与数据帧均被记录" },
+    { "kind": "drops", "op": "==", "value": 0, "tolerance": 0.0, "description": "无损链路不应丢帧" }
+  ]
+}

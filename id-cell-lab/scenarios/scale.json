@@ -1,0 +1,116 @@
+{
+  "name": "规模验证：8 组设备在纯事件驱动下并发绑定",
+  "duration_ms": 4000,
+  "seed": 19,
+  "key": "idcell-lab-key",
+  "link": {
+    "delay_ms": 2,
+    "jitter_ms": 1,
+    "media": "ethernet",
+    "topology": "switched",
+    "t_link_min_ms": 1
+  },
+  "devices": [
+    {
+      "name": "sensor-ratio",
+      "did": "00000000-00000051",
+      "caps": [{ "index": 1, "sub": 0, "label": "占空比", "qty": "ratio", "unit": "%", "t_prod_ms": 20, "stale_ms": 1000 }],
+      "values": [{ "index": 1, "sub": 0, "base": 50.0, "amplitude": 5.0, "period_ms": 2000, "noise": 0.1 }]
+    },
+    {
+      "name": "app-ratio",
+      "did": "00000000-00000052",
+      "reqs": [{ "qty": "ratio", "unit": "%", "want_ms": 100, "stale_ms": 1000 }]
+    },
+    {
+      "name": "sensor-length",
+      "did": "00000000-00000053",
+      "caps": [{ "index": 1, "sub": 0, "label": "位移", "qty": "length", "unit": "m", "t_prod_ms": 20, "stale_ms": 1000 }],
+      "values": [{ "index": 1, "sub": 0, "base": 1.2, "amplitude": 0.2, "period_ms": 2500, "noise": 0.01 }]
+    },
+    {
+      "name": "app-length",
+      "did": "00000000-00000054",
+      "reqs": [{ "qty": "length", "unit": "m", "want_ms": 100, "stale_ms": 1000 }]
+    },
+    {
+      "name": "sensor-angle",
+      "did": "00000000-00000055",
+      "caps": [{ "index": 1, "sub": 0, "label": "倾角", "qty": "angle", "unit": "rad", "t_prod_ms": 20, "stale_ms": 1000 }],
+      "values": [{ "index": 1, "sub": 0, "base": 0.3, "amplitude": 0.1, "period_ms": 3000, "noise": 0.005 }]
+    },
+    {
+      "name": "app-angle",
+      "did": "00000000-00000056",
+      "reqs": [{ "qty": "angle", "unit": "rad", "want_ms": 100, "stale_ms": 1000 }]
+    },
+    {
+      "name": "sensor-mass",
+      "did": "00000000-00000057",
+      "caps": [{ "index": 1, "sub": 0, "label": "重量", "qty": "mass", "unit": "kg", "t_prod_ms": 20, "stale_ms": 1000 }],
+      "values": [{ "index": 1, "sub": 0, "base": 8.0, "amplitude": 1.5, "period_ms": 3500, "noise": 0.05 }]
+    },
+    {
+      "name": "app-mass",
+      "did": "00000000-00000058",
+      "reqs": [{ "qty": "mass", "unit": "kg", "want_ms": 100, "stale_ms": 1000 }]
+    },
+    {
+      "name": "sensor-time",
+      "did": "00000000-00000059",
+      "caps": [{ "index": 1, "sub": 0, "label": "时长", "qty": "time", "unit": "s", "t_prod_ms": 20, "stale_ms": 1000 }],
+      "values": [{ "index": 1, "sub": 0, "base": 60.0, "amplitude": 5.0, "period_ms": 2000, "noise": 0.2 }]
+    },
+    {
+      "name": "app-time",
+      "did": "00000000-0000005A",
+      "reqs": [{ "qty": "time", "unit": "s", "want_ms": 100, "stale_ms": 1000 }]
+    },
+    {
+      "name": "sensor-temp",
+      "did": "00000000-0000005B",
+      "caps": [{ "index": 1, "sub": 0, "label": "水温", "qty": "temperature", "unit": "C", "t_prod_ms": 20, "stale_ms": 1000 }],
+      "values": [{ "index": 1, "sub": 0, "base": 25.0, "amplitude": 3.0, "period_ms": 2200, "noise": 0.1 }]
+    },
+    {
+      "name": "app-temp",
+      "did": "00000000-0000005C",
+      "reqs": [{ "qty": "temperature", "unit": "C", "want_ms": 100, "stale_ms": 1000 }]
+    },
+    {
+      "name": "sensor-current",
+      "did": "00000000-0000005D",
+      "caps": [{ "index": 1, "sub": 0, "label": "电流", "qty": "current", "unit": "A", "t_prod_ms": 20, "stale_ms": 1000 }],
+      "values": [{ "index": 1, "sub": 0, "base": 2.0, "amplitude": 0.4, "period_ms": 1800, "noise": 0.02 }]
+    },
+    {
+      "name": "app-current",
+      "did": "00000000-0000005E",
+      "reqs": [{ "qty": "current", "unit": "A", "want_ms": 100, "stale_ms": 1000 }]
+    },
+    {
+      "name": "sensor-lux",
+      "did": "00000000-0000005F",
+      "caps": [{ "index": 1, "sub": 0, "label": "照度", "qty": "luminosity", "unit": "cd", "t_prod_ms": 20, "stale_ms": 1000 }],
+      "values": [{ "index": 1, "sub": 0, "base": 400.0, "amplitude": 100.0, "period_ms": 2600, "noise": 2.0 }]
+    },
+    {
+      "name": "app-lux",
+      "did": "00000000-00000060",
+      "reqs": [{ "qty": "luminosity", "unit": "cd", "want_ms": 100, "stale_ms": 1000 }]
+    }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "app-ratio", "peer": "sensor-ratio", "stage": "active", "description": "ratio 组绑定成功" },
+    { "kind": "stage", "device": "app-length", "peer": "sensor-length", "stage": "active", "description": "length 组绑定成功" },
+    { "kind": "stage", "device": "app-angle", "peer": "sensor-angle", "stage": "active", "description": "angle 组绑定成功" },
+    { "kind": "stage", "device": "app-mass", "peer": "sensor-mass", "stage": "active", "description": "mass 组绑定成功" },
+    { "kind": "stage", "device": "app-time", "peer": "sensor-time", "stage": "active", "description": "time 组绑定成功" },
+    { "kind": "stage", "device": "app-temp", "peer": "sensor-temp", "stage": "active", "description": "temperature 组绑定成功" },
+    { "kind": "stage", "device": "app-current", "peer": "sensor-current", "stage": "active", "description": "current 组绑定成功" },
+    { "kind": "stage", "device": "app-lux", "peer": "sensor-lux", "stage": "active", "description": "luminosity 组绑定成功" },
+    { "kind": "binds_ok", "op": ">=", "value": 8, "description": "8 组设备全部完成绑定" },
+    { "kind": "events_rx", "op": ">=", "value": 100, "description": "规模场景下事件持续到达" },
+    { "kind": "drops", "op": "==", "value": 0, "tolerance": 0.0, "description": "无损链路上无丢帧" }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "name": "写权限：无租约写入被拒绝，持租约写入成功",
+  "duration_ms": 5000,
+  "seed": 11,
+  "key": "idcell-lab-key",
+  "link": { "delay_ms": 1, "media": "ethernet", "topology": "p2p", "t_link_min_ms": 1 },
+  "devices": [
+    {
+      "name": "valve-01",
+      "did": "00000000-00000031",
+      "caps": [
+        {
+          "index": 7,
+          "sub": 0,
+          "label": "阀门开度",
+          "qty": "ratio",
+          "unit": "%",
+          "dtype": "f64",
+          "perm": 3,
+          "dir": 3,
+          "t_prod_ms": 50,
+          "stale_ms": 2000
+        }
+      ],
+      "values": [
+        { "index": 7, "sub": 0, "base": 40.0, "amplitude": 5.0, "period_ms": 3000, "noise": 0.0 }
+      ]
+    },
+    {
+      "name": "app-owner",
+      "did": "00000000-00000032",
+      "preempt": true,
+      "reqs": [
+        { "qty": "ratio", "unit": "%", "kind": 1, "want_ms": 100, "stale_ms": 2000, "range": [0.0, 100.0] }
+      ]
+    },
+    {
+      "name": "app-guest",
+      "did": "00000000-00000033",
+      "reqs": [
+        { "qty": "ratio", "unit": "%", "want_ms": 100, "stale_ms": 2000 }
+      ]
+    }
+  ],
+  "faults": [
+    { "at_ms": 2000, "kind": "write", "device": "app-owner", "peer": "valve-01", "index": 7, "sub": 0, "value": 65.0, "intent": "开大阀门" },
+    { "at_ms": 2600, "kind": "write", "device": "app-guest", "peer": "valve-01", "index": 7, "sub": 0, "value": 10.0, "intent": "越权写入" }
+  ],
+  "asserts": [
+    { "kind": "writes_ok", "op": ">=", "value": 1, "description": "持租约写入成功" },
+    { "kind": "writes_rejected", "op": ">=", "value": 1, "description": "无租约写入被拒绝" },
+    { "kind": "frame", "frame": "WRITE", "op": ">=", "value": 2, "description": "两次写入都真正上了链路" },
+    { "kind": "stage", "device": "app-owner", "peer": "valve-01", "stage": "active", "description": "租约持有者保持 Active" }
+  ]
+}

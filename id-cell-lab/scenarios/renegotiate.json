@@ -1,0 +1,49 @@
+{
+  "name": "运行中重新协商：T_pub 500 ms → 50 ms，绑定与租约保持不变",
+  "duration_ms": 5000,
+  "seed": 3,
+  "key": "idcell-lab-key",
+  "link": {
+    "delay_ms": 1,
+    "media": "loopback",
+    "topology": "p2p",
+    "t_link_min_ms": 1
+  },
+  "devices": [
+    {
+      "name": "sensor-rn",
+      "did": "00000000-00000041",
+      "caps": [
+        {
+          "index": 1,
+          "sub": 0,
+          "label": "电压",
+          "qty": "voltage",
+          "unit": "V",
+          "t_prod_ms": 20,
+          "stale_ms": 2000
+        }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 12.0, "amplitude": 1.0, "period_ms": 4000, "noise": 0.05 }
+      ]
+    },
+    {
+      "name": "app-rn",
+      "did": "00000000-00000042",
+      "reqs": [
+        { "qty": "voltage", "unit": "V", "want_ms": 500, "stale_ms": 2000 }
+      ]
+    }
+  ],
+  "faults": [
+    { "at_ms": 2000, "kind": "renegotiate", "device": "app-rn", "peer": "sensor-rn", "value": 50 }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "app-rn", "peer": "sensor-rn", "stage": "active", "description": "重协商后会话仍为 Active" },
+    { "kind": "stage", "device": "sensor-rn", "peer": "app-rn", "stage": "active", "description": "提供方保持 Active" },
+    { "kind": "binds_ok", "op": "==", "value": 2, "tolerance": 0.0, "description": "重协商未产生第二次绑定（两端各一次）" },
+    { "kind": "frame", "frame": "RENEGOTIATE", "op": ">=", "value": 1, "description": "线上出现重新协商帧" },
+    { "kind": "events_rx", "op": ">=", "value": 40, "description": "提速后事件数量显著增加" }
+  ]
+}

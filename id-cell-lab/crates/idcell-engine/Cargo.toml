@@ -1,0 +1,8 @@
+[package]
+name = "idcell-engine"
+version.workspace = true
+edition.workspace = true
+description = "ID-CELL 仿真引擎：虚拟时钟、虚拟链路、设备状态机"
+
+[dependencies]
+idcell-core = { path = "../idcell-core" }

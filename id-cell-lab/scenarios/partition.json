@@ -1,0 +1,44 @@
+{
+  "name": "链路隔离与恢复：T_stale 触发后重新发现",
+  "duration_ms": 9000,
+  "seed": 3,
+  "key": "idcell-lab-key",
+  "link": { "delay_ms": 2, "media": "can", "topology": "p2p", "t_link_min_ms": 2, "mtu": 0 },
+  "devices": [
+    {
+      "name": "plc-01",
+      "did": "00000000-00000021",
+      "caps": [
+        {
+          "index": 3,
+          "sub": 0,
+          "label": "油压",
+          "qty": "pressure",
+          "unit": "kPa",
+          "dtype": "f64",
+          "t_prod_ms": 20,
+          "stale_ms": 800
+        }
+      ],
+      "values": [
+        { "index": 3, "sub": 0, "base": 300.0, "amplitude": 20.0, "period_ms": 1500, "noise": 1.0 }
+      ]
+    },
+    {
+      "name": "hmi-01",
+      "did": "00000000-00000022",
+      "reqs": [
+        { "qty": "pressure", "unit": "kPa", "want_ms": 50, "stale_ms": 400 }
+      ]
+    }
+  ],
+  "faults": [
+    { "at_ms": 1200, "kind": "partition", "a": "plc-01", "b": "hmi-01" },
+    { "at_ms": 2600, "kind": "heal", "a": "plc-01", "b": "hmi-01" }
+  ],
+  "asserts": [
+    { "kind": "stale_events", "op": ">=", "value": 1, "description": "断链后检测到数据过期" },
+    { "kind": "bound", "op": ">=", "value": 2, "description": "恢复后重新完成绑定" },
+    { "kind": "stage", "device": "hmi-01", "peer": "plc-01", "stage": "active", "description": "恢复后回到 Active" }
+  ]
+}

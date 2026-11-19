@@ -1,0 +1,9 @@
+[package]
+name = "idcell-scenario"
+version.workspace = true
+edition.workspace = true
+description = "ID-CELL 场景描述、断言与运行编排"
+
+[dependencies]
+idcell-core = { path = "../idcell-core" }
+idcell-engine = { path = "../idcell-engine" }

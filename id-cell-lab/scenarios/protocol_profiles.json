@@ -1,0 +1,45 @@
+{
+  "name": "协议档：RT 设备出站帧携带 PROF=1，STD 设备为 0",
+  "duration_ms": 4000,
+  "seed": 23,
+  "key": "idcell-lab-key",
+  "link": { "delay_ms": 1, "media": "ethernet", "topology": "p2p", "t_link_min_ms": 1 },
+  "devices": [
+    {
+      "name": "sensor-rt",
+      "did": "00000000-00000061",
+      "protocol": "rt",
+      "caps": [
+        {
+          "index": 1,
+          "sub": 0,
+          "label": "温度",
+          "qty": "temperature",
+          "unit": "C",
+          "dtype": "f64",
+          "perm": 1,
+          "dir": 1,
+          "t_prod_ms": 100,
+          "stale_ms": 2000
+        }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 24.0, "amplitude": 2.0, "period_ms": 2000, "noise": 0.0 }
+      ]
+    },
+    {
+      "name": "monitor-std",
+      "did": "00000000-00000062",
+      "protocol": "std",
+      "reqs": [
+        { "qty": "temperature", "unit": "C", "kind": 1, "want_ms": 200, "stale_ms": 2000 }
+      ]
+    }
+  ],
+  "asserts": [
+    { "kind": "prof", "device": "sensor-rt", "op": "==", "value": 1, "description": "发送端为 RT 协议档" },
+    { "kind": "prof", "device": "monitor-std", "op": "==", "value": 0, "description": "接收端为 STD 协议档" },
+    { "kind": "stage", "device": "monitor-std", "peer": "sensor-rt", "stage": "active", "description": "RT 设备可与 STD 设备完成绑定" },
+    { "kind": "frame", "frame": "HELLO", "op": ">=", "value": 1, "description": "握手帧实际上链路" }
+  ]
+}
