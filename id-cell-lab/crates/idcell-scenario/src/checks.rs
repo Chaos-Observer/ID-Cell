@@ -13,6 +13,7 @@
 //!   query_replies —— 指定 device 聚合到的应答条数（device 字段）
 //!   value        —— device 收到的点值（index/sub），带容差
 //!   point        —— device 本地维护的点值（index/sub），带容差
+//!   value_prov   —— device 收到的点值来源标记（index/sub）
 //!   frame        —— 帧类型计数，frame 字段为类型名（如 EVENT）
 
 use crate::model::AssertDef;
@@ -99,6 +100,7 @@ fn counter(world: &World, kind: &str) -> Option<u64> {
         "state_changes" => world.total_state_changes(),
         "alarms_raised" => world.total_alarms_raised(),
         "alarms_cleared" => world.total_alarms_cleared(),
+        "alarms_escalated" => world.total_alarms_escalated(),
         "link_ack_tx" => world.total_link_ack_tx(),
         "dup_drops" => world.total_dup_drops(),
         "provision_sent" => world.total_provision_sent(),
@@ -214,6 +216,17 @@ pub fn evaluate_one(world: &World, def: &AssertDef) -> AssertResult {
             result.detail = format!(
                 "{} 本地点 ({},{}) 值 {:.3} {} {:.3}（质量 {}）",
                 def.device, def.index, def.sub, p.value, def.op, def.value, p.quality
+            );
+        }
+        "value_prov" => {
+            let Some(prov) = world.received_prov(&def.device, def.index, def.sub) else {
+                result.detail = format!("{} 未收到点 ({},{})", def.device, def.index, def.sub);
+                return result;
+            };
+            result.passed = compare(&def.op, prov as f64, def.value, def.tolerance);
+            result.detail = format!(
+                "{} 点 ({},{}) 来源 {prov} {} {}",
+                def.device, def.index, def.sub, def.op, def.value
             );
         }
         "value" => {

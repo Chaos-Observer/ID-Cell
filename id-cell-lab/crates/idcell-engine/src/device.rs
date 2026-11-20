@@ -389,6 +389,8 @@ pub struct DeviceCounters {
     /// 报警产生 / 复位次数
     pub alarms_raised: u64,
     pub alarms_cleared: u64,
+    /// 高报警持续越限后升级为高高报警的次数
+    pub alarms_escalated: u64,
     /// 入网完成次数（提供方受理 / 消费方应用各计一次）
     pub provision_ok: u64,
     /// 入网被拒（会话未 active、HMAC 失败、组号非法）
@@ -543,6 +545,8 @@ pub struct AlarmDef {
     pub deadband: f64,
     /// 条件持续多久才确认报警（ms）。
     pub delay_ms: u64,
+    /// 高报警持续该时长后升级为高高报警（0 表示不升级）。
+    pub escalate_ms: u64,
 }
 
 impl Default for AlarmDef {
@@ -556,6 +560,7 @@ impl Default for AlarmDef {
             ll: f64::NEG_INFINITY,
             deadband: 0.0,
             delay_ms: 0,
+            escalate_ms: 0,
         }
     }
 }
@@ -568,6 +573,8 @@ pub struct AlarmState {
     pub pending: u8,
     pub pending_since: u64,
     pub since_ms: u64,
+    /// 本次高报警是否已升级为高高，避免重复计数。
+    pub escalated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1856,7 +1863,11 @@ impl Device {
             };
             let st = self.alarm_states.entry(key).or_default();
             let cur = st.level;
-            let target = if cur == 4 {
+            // 升级后的高高报警在高限仍越限期间保持，不随阈值回落抖动。
+            let escalated_hold = cur == 4 && st.escalated && v >= a.h;
+            let target = if escalated_hold {
+                4
+            } else if cur == 4 {
                 if v >= a.hh - a.deadband {
                     4
                 } else if v >= a.h {
@@ -1918,6 +1929,17 @@ impl Device {
             if target == cur {
                 st.pending = cur;
                 st.pending_since = now;
+                // 高报警持续越久升级为高高报警（0 表示不升级）。
+                if cur == 3
+                    && !st.escalated
+                    && a.escalate_ms > 0
+                    && now.saturating_sub(st.since_ms) >= a.escalate_ms
+                {
+                    st.level = 4;
+                    st.escalated = true;
+                    st.since_ms = now;
+                    self.counters.alarms_escalated += 1;
+                }
                 continue;
             }
             if st.pending != target {
@@ -1926,6 +1948,7 @@ impl Device {
             }
             if now.saturating_sub(st.pending_since) >= a.delay_ms {
                 st.level = target;
+                st.escalated = false;
                 st.since_ms = now;
                 if target == 0 {
                     self.counters.alarms_cleared += 1;

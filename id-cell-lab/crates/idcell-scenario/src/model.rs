@@ -330,6 +330,8 @@ pub struct AlarmSpec {
     pub ll: f64,
     pub deadband: f64,
     pub delay_ms: u64,
+    /// 高报警持续该时长后升级为高高报警（0 表示不升级）。
+    pub escalate_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -428,6 +430,7 @@ impl DeviceDef {
                 ll: a.ll,
                 deadband: a.deadband,
                 delay_ms: a.delay_ms,
+                escalate_ms: a.escalate_ms,
             });
         }
         spec
@@ -740,6 +743,7 @@ fn parse_device(v: &Json, index: usize) -> Result<DeviceDef, String> {
                 ll: a.f64_field("ll").unwrap_or(f64::NEG_INFINITY),
                 deadband: a.f64_field("deadband").unwrap_or(0.0),
                 delay_ms: a.u64_field("delay_ms").unwrap_or(0),
+                escalate_ms: a.u64_field("escalate_ms").unwrap_or(0),
             });
         }
     }

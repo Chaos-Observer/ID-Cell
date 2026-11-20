@@ -1,0 +1,40 @@
+{
+  "name": "报警升级与数据来源：持续高报警升级、来源标记透传",
+  "duration_ms": 4000,
+  "tick_ms": 100,
+  "seed": 61,
+  "key": "idcell-lab-key",
+  "require_link": true,
+  "link": { "delay_ms": 1, "media": "ethernet", "topology": "p2p", "t_link_min_ms": 1 },
+  "devices": [
+    {
+      "name": "sensor-01",
+      "did": "00000000-00000221",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "炉膛温度", "qty": "temperature", "unit": "Cel", "dtype": "f64", "scale": 2, "t_prod_ms": 100, "stale_ms": 3000, "prov": 1, "range": [0, 200] }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 90.0, "amplitude": 0.0, "period_ms": 1000 }
+      ],
+      "alarms": [
+        { "index": 1, "sub": 0, "hh": 120, "h": 80, "l": 20, "ll": 10, "deadband": 0, "delay_ms": 0, "escalate_ms": 1000 }
+      ]
+    },
+    {
+      "name": "mon-01",
+      "did": "00000000-00000222",
+      "reqs": [
+        { "qty": "temperature", "unit": "Cel", "range": [0, 200], "want_ms": 100, "stale_ms": 3000 }
+      ]
+    }
+  ],
+  "links": [
+    { "a": "sensor-01", "b": "mon-01" }
+  ],
+  "faults": [],
+  "asserts": [
+    { "kind": "alarm", "device": "sensor-01", "index": 1, "sub": 0, "op": "==", "value": 4, "tolerance": 0.0, "description": "高报警持续越限后升级为高高报警" },
+    { "kind": "alarms_escalated", "op": ">=", "value": 1, "description": "记录报警升级次数" },
+    { "kind": "value_prov", "device": "mon-01", "index": 1, "sub": 0, "op": "==", "value": 1, "tolerance": 0.0, "description": "点值来源标记随事件透传到消费方" }
+  ]
+}

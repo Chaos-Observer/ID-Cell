@@ -1628,6 +1628,12 @@ impl World {
         d.recv.get(&(index, sub)).map(|v| (v.value, v.stale, v.quality))
     }
 
+    /// 收到点值的数据来源标记（0=本地直采，1=网关转发，2=计算生成…）。
+    pub fn received_prov(&self, device: &str, index: u16, sub: u8) -> Option<u8> {
+        let d = self.device(device)?;
+        d.recv.get(&(index, sub)).map(|v| v.prov)
+    }
+
     pub fn total_binds_ok(&self) -> u64 {
         self.devices.iter().map(|d| d.counters.binds_ok).sum()
     }
@@ -1792,6 +1798,11 @@ impl World {
         self.devices.iter().map(|d| d.counters.hold_suppressed).sum()
     }
 
+    /// 报警升级为高高报警的次数。
+    pub fn total_alarms_escalated(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.alarms_escalated).sum()
+    }
+
     pub fn total_events_rx(&self) -> u64 {
         self.devices.iter().map(|d| d.counters.events_rx).sum()
     }
@@ -1871,9 +1882,9 @@ impl World {
                     .cap(*idx, *sub)
                     .map(|c| (c.dtype, c.dir, c.range))
                     .unwrap_or((idcell_core::consts::dtype::F64, 1, (-1e9, 1e9)));
-                let (value, stale, quality, at) = match d.recv.get(&(*idx, *sub)) {
-                    Some(v) => (v.value, v.stale, v.quality, v.received_ms),
-                    None => (p.value, false, p.quality, p.ts_ms),
+                let (value, stale, quality, prov, at) = match d.recv.get(&(*idx, *sub)) {
+                    Some(v) => (v.value, v.stale, v.quality, v.prov, v.received_ms),
+                    None => (p.value, false, p.quality, 0, p.ts_ms),
                 };
                 values.push(ValueView {
                     index: *idx,
@@ -1885,6 +1896,7 @@ impl World {
                     hi,
                     value,
                     quality,
+                    prov,
                     stale,
                     age_ms: self.now_ms.saturating_sub(at),
                 });
@@ -1908,6 +1920,7 @@ impl World {
                     hi,
                     value: v.value,
                     quality: v.quality,
+                    prov: v.prov,
                     stale: v.stale,
                     age_ms: self.now_ms.saturating_sub(v.received_ms),
                 });
@@ -2061,6 +2074,8 @@ pub struct ValueView {
     pub hi: f64,
     pub value: f64,
     pub quality: u8,
+    /// 数据来源标记（0=本地直采，1=网关转发，2=计算生成）。
+    pub prov: u8,
     pub stale: bool,
     pub age_ms: u64,
 }
@@ -2300,7 +2315,7 @@ impl Snapshot {
                     s.push(',');
                 }
                 s.push_str(&format!(
-                    "{{\"index\":{},\"sub\":{},\"label\":\"{}\",\"dtype\":\"{}\",\"dir\":{},\"lo\":{},\"hi\":{},\"value\":{},\"quality\":{},\"stale\":{},\"age_ms\":{}}}",
+                    "{{\"index\":{},\"sub\":{},\"label\":\"{}\",\"dtype\":\"{}\",\"dir\":{},\"lo\":{},\"hi\":{},\"value\":{},\"quality\":{},\"prov\":{},\"stale\":{},\"age_ms\":{}}}",
                     v.index,
                     v.sub,
                     json_escape(&v.label),
@@ -2310,13 +2325,14 @@ impl Snapshot {
                     json_num(v.hi),
                     json_num(round3(v.value)),
                     v.quality,
+                    v.prov,
                     v.stale,
                     v.age_ms
                 ));
             }
             s.push_str("],\"counters\":{");
             s.push_str(&format!(
-                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"link_ack_tx\":{},\"dup_drops\":{},\"provision_sent\":{},\"provision_ok\":{},\"provision_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{},\"actuator_moves\":{},\"state_changes\":{},\"alarms_raised\":{},\"alarms_cleared\":{},\"writes_converted\":{},\"writes_unit_rejected\":{},\"fail_safe_actions\":{},\"hold_suppressed\":{}",
+                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"link_ack_tx\":{},\"dup_drops\":{},\"provision_sent\":{},\"provision_ok\":{},\"provision_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{},\"actuator_moves\":{},\"state_changes\":{},\"alarms_raised\":{},\"alarms_cleared\":{},\"alarms_escalated\":{},\"writes_converted\":{},\"writes_unit_rejected\":{},\"fail_safe_actions\":{},\"hold_suppressed\":{}",
                 d.counters.tx,
                 d.counters.rx,
                 d.counters.binds_ok,
@@ -2364,6 +2380,7 @@ impl Snapshot {
                 d.counters.state_changes,
                 d.counters.alarms_raised,
                 d.counters.alarms_cleared,
+                d.counters.alarms_escalated,
                 d.counters.writes_converted,
                 d.counters.writes_unit_rejected,
                 d.counters.fail_safe_actions,
