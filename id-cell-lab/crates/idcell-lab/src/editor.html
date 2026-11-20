@@ -1479,7 +1479,7 @@ function renderMonitor() {
     ["平均时延", (m.avg_latency_ms ?? 0).toFixed(2) + "ms"],
     ["P95 时延", (m.p95_latency_ms ?? 0).toFixed(1) + "ms"],
     ["吞吐", (m.throughput_kbps ?? 0).toFixed(1) + "k"],
-    ["绑定成功", sum("binds_ok")], ["重连复用", sum("resumes_ok")], ["组播缺席", sum("group_missing")], ["配置拒绝", sum("config_rejects")], ["写拒绝", sum("writes_rejected")], ["查询", sum("queries_sent")]
+    ["绑定成功", sum("binds_ok")], ["重连复用", sum("resumes_ok")], ["组播缺席", sum("group_missing")], ["描述重组", sum("desc_reassemble_ok")], ["链路重传", m.link_retx ?? 0], ["入网", sum("provision_ok")], ["命令完成", sum("done_rx")], ["命令失败", sum("done_errors")], ["配置拒绝", sum("config_rejects")], ["写拒绝", sum("writes_rejected")], ["查询", sum("queries_sent")]
   ];
   const asserts = d.assertions || [];
   const passed = asserts.filter(a => a.passed).length;
