@@ -56,7 +56,9 @@
   #editor {
     flex: 1; min-height: 0; position: relative;
     display: grid; grid-template-columns: 52px 214px minmax(0, 1fr) 342px;
+    grid-template-rows: minmax(0, 1fr);
   }
+  #editor.mon-open { grid-template-rows: minmax(0, 1fr) minmax(210px, 34vh); }
   #rail {
     background: #0b1118; border-right: 1px solid var(--line);
     display: flex; flex-direction: column; align-items: center;
@@ -176,12 +178,11 @@
   }
   #inspector { border-right: none; border-left: 1px solid var(--line); }
 
-  /* 可选监控侧边栏：覆盖在属性面板上方，关闭后不占布局 */
+  /* 底部数据监控坞：与画布同为主界面的一部分，不遮挡属性面板 */
   #monitor {
-    position: absolute; right: 0; top: 0; bottom: 0; width: 420px; z-index: 20;
-    display: flex; flex-direction: column;
-    background: #0b1118; border-left: 1px solid var(--line);
-    box-shadow: -18px 0 36px rgba(0,0,0,.42);
+    grid-column: 1 / -1; position: relative;
+    display: flex; flex-direction: column; min-height: 0;
+    background: #0b1118; border-top: 1px solid var(--line);
   }
   #monitor[hidden] { display: none; }
   .mon-head {
@@ -203,13 +204,15 @@
     background: rgba(76,194,255,.08);
   }
   .mon-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 24px; }
-  .mon-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .mon-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 6px; }
   .mon-stat {
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 7px; padding: 6px 8px;
   }
   .mon-stat .k { color: var(--dim); font-size: 10px; }
   .mon-stat .v { font-family: var(--mono); font-size: 15px; margin-top: 1px; }
+  .mon-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 900px) { .mon-charts { grid-template-columns: 1fr; } }
   .mon-chart {
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 7px; padding: 6px 8px; margin-top: 8px;
@@ -310,6 +313,7 @@
   .live-val.stale .n { color: var(--warn); }
   @media (max-width: 1120px) {
     #editor { grid-template-columns: 48px 176px minmax(0, 1fr) 300px; }
+    #editor.mon-open { grid-template-rows: minmax(0, 1fr) minmax(190px, 40vh); }
   }
 </style>
 </head>
@@ -393,7 +397,8 @@
     <div class="mon-tabs">
       <button data-mon="overview" class="on">概览</button>
       <button data-mon="trace">事件</button>
-      <button data-mon="frames">帧</button>
+      <button data-mon="frames">帧详情</button>
+      <button data-mon="medium">介质传播</button>
     </div>
     <div class="mon-body" id="mon-body"></div>
   </aside>
@@ -1369,6 +1374,7 @@ function toggleMonitor(force) {
   monOpen = force == null ? !monOpen : !!force;
   const el = document.getElementById("monitor");
   el.hidden = !monOpen;
+  document.getElementById("editor").classList.toggle("mon-open", monOpen);
   document.getElementById("btn-monitor").classList.toggle("primary", monOpen);
   if (monOpen) renderMonitor();
 }
@@ -1485,12 +1491,29 @@ function renderMonitor() {
     return;
   }
 
+  if (monTab === "medium") {
+    const rows = (d.medium || []).slice().reverse();
+    box.innerHTML = rows.length ? rows.map(x => `
+      <div class="mon-line">
+        <span class="t">${x.t}</span>
+        <span class="ty">${x.bus ? "总线" : "链路"}</span>
+        <span class="f">${esc(x.media)} ${esc(x.from)}→${esc(x.to)}</span>
+        <span>${esc(x.type)} #${x.seq} · ${x.len}B · 等 ${x.wait_ms}ms · 占 ${x.tx_ms}ms${x.arb ? " · 仲裁 0x" + Number(x.arb).toString(16).toUpperCase() : ""} · 听到 ${esc(x.heard)}</span>
+      </div>`).join("") : '<div class="dim">暂无介质传播</div>';
+    return;
+  }
+
   const sum = k => (d.devices || []).reduce((a, x) => a + ((x.counters || {})[k] || 0), 0);
   const stats = [
     ["帧发送", m.frames_tx ?? 0], ["帧接收", m.frames_rx ?? 0], ["丢包", m.drops ?? 0],
     ["平均时延", (m.avg_latency_ms ?? 0).toFixed(2) + "ms"],
     ["P95 时延", (m.p95_latency_ms ?? 0).toFixed(1) + "ms"],
     ["吞吐", (m.throughput_kbps ?? 0).toFixed(1) + "k"],
+    ["总线仲裁胜/负", `${m.bus_arb_won ?? 0}/${m.bus_arb_lost ?? 0}`],
+    ["总线等待", `${m.bus_wait_ms ?? 0}ms`],
+    ["半双工转向", m.bus_turnarounds ?? 0],
+    ["自听回显", m.bus_echoes ?? 0],
+    ["介质传播", m.medium_count ?? 0],
     ["绑定成功", sum("binds_ok")], ["重连复用", sum("resumes_ok")], ["组播缺席", sum("group_missing")], ["描述重组", sum("desc_reassemble_ok")], ["链路重传", m.link_retx ?? 0], ["入网", sum("provision_ok")], ["命令完成", sum("done_rx")], ["命令失败", sum("done_errors")], ["配置拒绝", sum("config_rejects")], ["写拒绝", sum("writes_rejected")], ["查询", sum("queries_sent")]
   ];
   const asserts = d.assertions || [];
@@ -1499,13 +1522,15 @@ function renderMonitor() {
     <div class="mon-stats">
       ${stats.map(([k, v]) => `<div class="mon-stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")}
     </div>
-    <div class="mon-chart">
-      <div class="mct"><span>时延趋势 p50 / p95</span><span>${(m.p50_latency_ms ?? 0).toFixed(1)} / ${(m.p95_latency_ms ?? 0).toFixed(1)} ms</span></div>
-      <canvas id="mon-lat" width="560" height="56"></canvas>
-    </div>
-    <div class="mon-chart">
-      <div class="mct"><span>发送帧速率</span><span>${(monHist.rate[monHist.rate.length - 1] || 0).toFixed(1)} 帧/秒</span></div>
-      <canvas id="mon-rate" width="560" height="56"></canvas>
+    <div class="mon-charts">
+      <div class="mon-chart">
+        <div class="mct"><span>时延趋势 p50 / p95</span><span>${(m.p50_latency_ms ?? 0).toFixed(1)} / ${(m.p95_latency_ms ?? 0).toFixed(1)} ms</span></div>
+        <canvas id="mon-lat" width="560" height="56"></canvas>
+      </div>
+      <div class="mon-chart">
+        <div class="mct"><span>发送帧速率</span><span>${(monHist.rate[monHist.rate.length - 1] || 0).toFixed(1)} 帧/秒</span></div>
+        <canvas id="mon-rate" width="560" height="56"></canvas>
+      </div>
     </div>
     <div class="side-sub">断言 ${passed}/${asserts.length}</div>
     ${asserts.length ? asserts.map(a => `
@@ -2524,6 +2549,7 @@ async function boot() {
   }
   renderInspector();
   requestAnimationFrame(() => { fitView(); updateHint(); });
+  toggleMonitor(true);
   connectLive();
   await applyTopology(true);
   renderSidePanels();

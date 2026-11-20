@@ -5,7 +5,7 @@
 //!   idcell-lab serve <scenario.json> [--port 8787] [--speed 1]
 //!
 //! run   —— 一次性跑完场景，评估断言，进程退出码反映成败（适合 CI）。
-//! serve —— 启动本地 Web 实时面板（设备、六段管道、帧流、指标、故障注入）。
+//! serve —— 启动本地 Web 仿真控制台：画布拓扑为主界面，底部融合数据帧与介质监控。
 
 mod server;
 
@@ -111,7 +111,7 @@ fn usage() {
       一次性运行场景并评估断言；断言失败时退出码为 1。
 
   idcell-lab serve <scenario.json> [--port 8787] [--speed 1]
-      启动本地 Web 实时面板；--speed 支持 0.05~64 倍速。
+      启动本地 Web 仿真控制台；画布为主界面，底部融合帧详情与介质传播。
 "
     );
 }

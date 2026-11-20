@@ -1,8 +1,9 @@
 //! 极简 HTTP/1.1 + SSE 服务：零外部依赖。
 //!
 //! 路由：
-//!   GET  /                内嵌面板
-//!   GET  /editor          画布编辑器（拖拽设备、手动连线、属性配置）
+//!   GET  /                主界面：画布仿真 + 底部数据监控（设备/事件/帧详情/介质传播）
+//!   GET  /editor          同主界面（兼容旧链接）
+//!   GET  /panel           旧版独立监控面板（保留）
 //!   GET  /api/state       当前快照（JSON）
 //!   GET  /api/stream      SSE 实时快照
 //!   GET  /api/scenario    当前场景原始 JSON
@@ -34,8 +35,8 @@ pub fn serve(
     let sim = Arc::new(Mutex::new(Sim::new(scenario, scenario_json, speed)));
     spawn_ticker(Arc::clone(&sim));
 
-    println!("ID-CELL 仿真面板已启动：http://127.0.0.1:{port}/");
-    println!("画布编辑器：http://127.0.0.1:{port}/editor");
+    println!("ID-CELL 仿真控制台已启动：http://127.0.0.1:{port}/");
+    println!("旧版监控面板：http://127.0.0.1:{port}/panel");
     println!("按 Ctrl+C 结束。");
 
     for stream in listener.incoming() {
@@ -111,20 +112,20 @@ fn handle_client(mut stream: TcpStream, sim: Arc<Mutex<Sim>>) -> std::io::Result
     }
 
     match (method.as_str(), path.split('?').next().unwrap_or("/")) {
-        ("GET", "/") | ("GET", "/index.html") => {
-            respond(
-                &mut stream,
-                "200 OK",
-                "text/html; charset=utf-8",
-                PANEL_HTML.as_bytes(),
-            )?;
-        }
-        ("GET", "/editor") | ("GET", "/editor.html") => {
+        ("GET", "/") | ("GET", "/index.html") | ("GET", "/editor") | ("GET", "/editor.html") => {
             respond(
                 &mut stream,
                 "200 OK",
                 "text/html; charset=utf-8",
                 EDITOR_HTML.as_bytes(),
+            )?;
+        }
+        ("GET", "/panel") | ("GET", "/panel.html") => {
+            respond(
+                &mut stream,
+                "200 OK",
+                "text/html; charset=utf-8",
+                PANEL_HTML.as_bytes(),
             )?;
         }
         ("GET", "/api/media") => {
