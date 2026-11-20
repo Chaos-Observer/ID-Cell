@@ -1,7 +1,7 @@
 //! 世界编排：虚拟时钟、事件队列、路由、链路损伤、指标与快照。
 
 use crate::device::{Action, Device, DeviceCounters, DeviceSpec, Role, RunMode, Stage};
-use crate::link::{Link, LinkConfig};
+use crate::link::{is_bus_media, Link, LinkConfig};
 use crate::rng::Rng;
 use crate::trace::{json_escape, json_num, TraceEntry, TraceLog};
 use idcell_core::{decode_tlvs, ftype, tlv_type, Did, Frame, TlvWriter};
@@ -81,6 +81,14 @@ pub struct Metrics {
     pub link_acks: u64,
     /// 重传达到上限仍未确认、被放弃的帧
     pub link_drops: u64,
+    /// 共享总线争用次数（多主同时发送 / 从站抢发）。
+    pub bus_contention: u64,
+    /// 因总线忙而排队等待的次数。
+    pub bus_deferrals: u64,
+    /// 主从轮询窗口外抢发、被总线拒绝的帧数。
+    pub bus_poll_drops: u64,
+    /// 总线累计占用时间（ms），用于算负载率。
+    pub bus_busy_ms: u64,
 }
 
 /// 链路确认时延与重传上限（NFR-026：控制面帧 3 次重传内成功）。
@@ -178,6 +186,14 @@ pub struct World {
     /// 待链路确认的控制面帧。
     link_pending: BTreeMap<u64, LinkPending>,
     next_link_id: u64,
+    /// 共享总线：总线域 → 下一次可发送时刻（整段总线串行复用）。
+    bus_serial: BTreeMap<usize, u64>,
+    /// 共享总线：总线域 → 正在传输的结束时刻。
+    bus_busy_until: BTreeMap<usize, u64>,
+    /// 共享总线：总线域 → 当前占用者。
+    bus_last_tx: BTreeMap<usize, usize>,
+    /// 主从轮询：`(总线域, 从站)` → 点名窗口截止时刻。
+    bus_poll: BTreeMap<(usize, usize), u64>,
 }
 
 impl World {
@@ -207,6 +223,10 @@ impl World {
             flood_seen: BTreeMap::new(),
             link_pending: BTreeMap::new(),
             next_link_id: 1,
+            bus_serial: BTreeMap::new(),
+            bus_busy_until: BTreeMap::new(),
+            bus_last_tx: BTreeMap::new(),
+            bus_poll: BTreeMap::new(),
         }
     }
 
@@ -464,9 +484,28 @@ impl World {
     }
 
     fn link_config(&self, a: usize, b: usize) -> (LinkConfig, bool) {
-        match self.link_index(a, b) {
-            Some(i) => (self.links[i].cfg.clone(), self.links[i].partitioned),
-            None => (self.default_link.clone(), false),
+        if let Some(i) = self.link_index(a, b) {
+            return (self.links[i].cfg.clone(), self.links[i].partitioned);
+        }
+        // 共享总线上非直连的设备：沿用该总线域的链路参数（总线是同一段介质）。
+        if self.same_bus(a, b) {
+            if let Some(l) = self.links.iter().find(|l| {
+                !l.partitioned
+                    && is_bus_media(&l.cfg.media)
+                    && (l.a == a || l.b == a || l.a == b || l.b == b)
+            }) {
+                return (l.cfg.clone(), false);
+            }
+        }
+        (self.default_link.clone(), false)
+    }
+
+    /// 两台设备是否挂接在同一段共享总线上。
+    fn same_bus(&self, a: usize, b: usize) -> bool {
+        let map = self.bus_domains();
+        match (map.get(&a), map.get(&b)) {
+            (Some(x), Some(y)) => x == y,
+            _ => false,
         }
     }
 
@@ -535,6 +574,37 @@ impl World {
         }
     }
 
+    /// 共享总线域：通过总线介质（RS-485/CAN）相连的设备视为同一段总线。
+    /// 返回“已挂接总线”的设备 → 总线域编号；未接线或非总线介质的设备不在表中。
+    fn bus_domains(&self) -> BTreeMap<usize, usize> {
+        let n = self.devices.len();
+        let mut parent: Vec<usize> = (0..n).collect();
+        fn find(p: &mut Vec<usize>, mut x: usize) -> usize {
+            while p[x] != x {
+                x = p[x];
+            }
+            x
+        }
+        let mut attached = BTreeSet::new();
+        for l in &self.links {
+            if l.partitioned || !is_bus_media(&l.cfg.media) {
+                continue;
+            }
+            attached.insert(l.a);
+            attached.insert(l.b);
+            let (ra, rb) = (find(&mut parent, l.a), find(&mut parent, l.b));
+            if ra != rb {
+                parent[ra] = rb;
+            }
+        }
+        let mut out = BTreeMap::new();
+        for dev in attached {
+            let root = find(&mut parent, dev);
+            out.insert(dev, root);
+        }
+        out
+    }
+
     /// 广播目标：除自己、可选排除上一跳之外，同组且满足连线约束的设备。
     ///
     /// `strict_group=true` 仅用于 GROUP 帧：组播必须精确投递给 group_id 成员，
@@ -546,6 +616,7 @@ impl World {
         group: u16,
         strict_group: bool,
     ) -> Vec<usize> {
+        let bus = self.bus_domains();
         self.devices
             .iter()
             .enumerate()
@@ -555,10 +626,13 @@ impl World {
                 } else {
                     group == 0 || d.group == group || d.group == 0
                 };
+                // 共享总线上的设备即使没有显式两两连线，也能听到总线上的广播帧。
+                let reachable = self.link_index(from, *i).is_some()
+                    || (bus.get(&from).is_some() && bus.get(&from) == bus.get(i));
                 *i != from
                     && Some(*i) != exclude
                     && in_group
-                    && (!self.require_link || self.link_index(from, *i).is_some())
+                    && (!self.require_link || reachable)
             })
             .map(|(i, _)| i)
             .collect()
@@ -569,7 +643,7 @@ impl World {
         let from_name = self.devices[from].name.clone();
         let to_name = self.devices[target].name.clone();
         let ft = frame.frame_type;
-        if self.require_link && self.link_index(from, target).is_none() {
+        if self.require_link && self.link_index(from, target).is_none() && !self.same_bus(from, target) {
             self.metrics.drops += 1;
             self.trace.push(TraceEntry::new(
                 self.now_ms,
@@ -606,7 +680,7 @@ impl World {
 
     /// 定向单播：直连优先，否则沿“允许中继”的网关多跳转发。
     fn emit_unicast(&mut self, from: usize, target: usize, frame: &Frame, bytes: &[u8]) {
-        if !self.require_link || self.link_index(from, target).is_some() {
+        if !self.require_link || self.link_index(from, target).is_some() || self.same_bus(from, target) {
             self.emit_direct(from, target, frame, bytes);
             return;
         }
@@ -749,7 +823,88 @@ impl World {
             None => true,
         };
         let kbps = cfg.bandwidth_for(from_is_a) as u64;
-        if kbps > 0 {
+        if is_bus_media(&cfg.media) {
+            // 共享总线：整段总线串行复用，并叠加主从轮询与争用语义。
+            let bus_map = self.bus_domains();
+            let bus = bus_map.get(&b).copied().unwrap_or(b);
+            // 轮询窗口是总线级属性：同一段总线上任一链路启用即对整个总线生效。
+            let poll_ms = self
+                .links
+                .iter()
+                .filter(|l| {
+                    !l.partitioned
+                        && is_bus_media(&l.cfg.media)
+                        && bus_map.get(&l.a) == Some(&bus)
+                        && bus_map.get(&l.b) == Some(&bus)
+                })
+                .map(|l| l.cfg.poll_ms)
+                .max()
+                .unwrap_or(0);
+            if poll_ms > 0 {
+                let has_master = self
+                    .devices
+                    .iter()
+                    .enumerate()
+                    .any(|(i, d)| d.bus_master && bus_map.get(&i) == Some(&bus));
+                if self.devices[a].bus_master {
+                    // 主站点名：给被点名的从站开一个应答窗口。
+                    self.bus_poll
+                        .insert((bus, b), self.now_ms + poll_ms as u64);
+                } else if has_master
+                    && self
+                        .bus_poll
+                        .get(&(bus, a))
+                        .copied()
+                        .unwrap_or(0)
+                        < self.now_ms
+                {
+                    self.metrics.bus_poll_drops += 1;
+                    self.trace.push(TraceEntry::new(
+                        self.now_ms,
+                        "bus_poll",
+                        from_name,
+                        to_name,
+                        ftype::name(ft),
+                        "轮询窗口外抢发，总线拒绝（从站未被点名）".to_string(),
+                    ));
+                    return None;
+                }
+            }
+            let busy = self.bus_busy_until.get(&bus).copied().unwrap_or(0);
+            if busy > self.now_ms {
+                self.metrics.bus_deferrals += 1;
+                // 同一发送方连续排队不算争用；不同设备同时抢总线才计一次争用。
+                if self.bus_last_tx.get(&bus) != Some(&a) {
+                    self.metrics.bus_contention += 1;
+                    self.trace.push(TraceEntry::new(
+                        self.now_ms,
+                        "bus_busy",
+                        from_name,
+                        to_name,
+                        ftype::name(ft),
+                        format!("总线忙（剩余 {} ms），按{}", busy - self.now_ms,
+                            if cfg.topology == "multi_master" { "优先级仲裁" } else { "排队" }),
+                    ));
+                }
+            }
+            let mut tx_ms = 0u64;
+            if kbps > 0 {
+                tx_ms = ((len as u64 * 8).div_ceil(kbps)).max(1);
+            }
+            let free = self.bus_serial.get(&bus).copied().unwrap_or(0);
+            let start = self.now_ms.max(free);
+            let queued = start.saturating_sub(self.now_ms);
+            self.metrics.link_queue_ms += queued;
+            let end = start + tx_ms;
+            self.bus_serial.insert(bus, end);
+            self.bus_busy_until.insert(bus, end);
+            self.bus_last_tx.insert(bus, a);
+            self.metrics.bus_busy_ms += tx_ms;
+            if let Some(li) = self.link_index(a, b) {
+                self.links[li].busy_ms += tx_ms;
+            }
+            delay += queued + tx_ms;
+        } else if kbps > 0 {
             let bits = len as u64 * 8;
             let tx_ms = bits.div_ceil(kbps).max(1);
             let free = self.serial.get(&(a, b)).copied().unwrap_or(0);
@@ -1688,6 +1843,7 @@ impl World {
                 partitioned: l.partitioned,
                 frames: l.frames,
                 dropped: l.dropped,
+                busy_ms: l.busy_ms,
             })
             .collect();
         Snapshot {
@@ -1818,6 +1974,8 @@ pub struct LinkView {
     pub partitioned: bool,
     pub frames: u64,
     pub dropped: u64,
+    /// 共享总线累计占用时间（ms）；非总线链路恒为 0。
+    pub busy_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -1869,7 +2027,7 @@ impl Snapshot {
         ));
         s.push_str("\"metrics\":{");
         s.push_str(&format!(
-            "\"frames_tx\":{},\"frames_rx\":{},\"bytes_tx\":{},\"bytes_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"latency_samples\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"p50_latency_ms\":{},\"p95_latency_ms\":{},\"p99_latency_ms\":{},\"jitter_ms\":{},\"throughput_kbps\":{},\"queue_ms\":{},\"link_retx\":{},\"link_acks\":{},\"link_drops\":{}",
+            "\"frames_tx\":{},\"frames_rx\":{},\"bytes_tx\":{},\"bytes_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"latency_samples\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"p50_latency_ms\":{},\"p95_latency_ms\":{},\"p99_latency_ms\":{},\"jitter_ms\":{},\"throughput_kbps\":{},\"queue_ms\":{},\"link_retx\":{},\"link_acks\":{},\"link_drops\":{},\"bus_contention\":{},\"bus_deferrals\":{},\"bus_poll_drops\":{},\"bus_busy_ms\":{}",
             self.metrics.frames_tx,
             self.metrics.frames_rx,
             self.metrics.bytes_tx,
@@ -1888,7 +2046,11 @@ impl Snapshot {
             self.metrics.link_queue_ms,
             self.metrics.link_retx,
             self.metrics.link_acks,
-            self.metrics.link_drops
+            self.metrics.link_drops,
+            self.metrics.bus_contention,
+            self.metrics.bus_deferrals,
+            self.metrics.bus_poll_drops,
+            self.metrics.bus_busy_ms
         ));
         s.push_str("},\"devices\":[");
         for (i, d) in self.devices.iter().enumerate() {
@@ -2042,7 +2204,7 @@ impl Snapshot {
                 s.push(',');
             }
             s.push_str(&format!(
-                "{{\"a\":\"{}\",\"b\":\"{}\",\"media\":\"{}\",\"topology\":\"{}\",\"delay_ms\":{},\"loss_ppm\":{},\"uplink_kbps\":{},\"downlink_kbps\":{},\"mtu\":{},\"segment\":{},\"baud\":{},\"partitioned\":{},\"frames\":{},\"dropped\":{}}}",
+                "{{\"a\":\"{}\",\"b\":\"{}\",\"media\":\"{}\",\"topology\":\"{}\",\"delay_ms\":{},\"loss_ppm\":{},\"uplink_kbps\":{},\"downlink_kbps\":{},\"mtu\":{},\"segment\":{},\"baud\":{},\"partitioned\":{},\"frames\":{},\"dropped\":{},\"busy_ms\":{}}}",
                 json_escape(&l.a),
                 json_escape(&l.b),
                 json_escape(&l.media),
@@ -2056,7 +2218,8 @@ impl Snapshot {
                 l.baud,
                 l.partitioned,
                 l.frames,
-                l.dropped
+                l.dropped,
+                l.busy_ms
             ));
         }
         s.push_str("],\"trace\":[");

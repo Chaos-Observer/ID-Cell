@@ -24,6 +24,8 @@ pub struct LinkSpec {
     pub segment: bool,
     /// 串口/CAN 的物理波特率/位速率；0 表示不适用。
     pub baud: u32,
+    /// 主从轮询窗口（ms）；>0 启用半双工点名语义。
+    pub poll_ms: u32,
 }
 
 impl Default for LinkSpec {
@@ -43,6 +45,7 @@ impl Default for LinkSpec {
             downlink_kbps: 0,
             segment: false,
             baud: 0,
+            poll_ms: 0,
         }
     }
 }
@@ -64,6 +67,7 @@ impl LinkSpec {
             downlink_kbps: self.downlink_kbps,
             segment: self.segment,
             baud: self.baud,
+            poll_ms: self.poll_ms,
         }
     }
 
@@ -98,6 +102,7 @@ impl LinkSpec {
             downlink_kbps: v.u64_field("downlink_kbps").unwrap_or(serial_rate_down as u64) as u32,
             segment: v.bool_field("segment").unwrap_or(p.segment),
             baud,
+            poll_ms: v.u64_field("poll_ms").unwrap_or(0) as u32,
         }
     }
 }
@@ -302,6 +307,8 @@ pub struct DeviceDef {
     pub relay: bool,
     /// 协议档：0=STD，1=RT。
     pub prof: u8,
+    /// 是否为共享总线的主站（RS-485/Modbus 轮询发起方）。
+    pub bus_master: bool,
     pub caps: Vec<CapDef>,
     pub reqs: Vec<ReqDef>,
     pub sims: Vec<SimDef>,
@@ -318,6 +325,7 @@ impl DeviceDef {
         spec.preempt = self.preempt;
         spec.relay = self.relay;
         spec.prof = self.prof;
+        spec.bus_master = self.bus_master;
         spec.key = self
             .key
             .as_ref()
@@ -638,6 +646,7 @@ fn parse_device(v: &Json, index: usize) -> Result<DeviceDef, String> {
             Some("rt") | Some("RT") => 1,
             _ => v.u64_field("prof").unwrap_or(0).min(1) as u8,
         },
+        bus_master: v.bool_field("bus_master").unwrap_or(false),
         caps,
         reqs,
         sims,

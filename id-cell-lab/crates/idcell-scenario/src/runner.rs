@@ -32,7 +32,7 @@ impl RunOutcome {
         }
         let m = &self.snapshot.metrics;
         s.push_str(&format!(
-            "],\"metrics\":{{\"frames_tx\":{},\"frames_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"binds_ok\":{},\"binds_fail\":{},\"resumes_ok\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"cmd_acks\":{},\"done_rx\":{},\"done_errors\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"link_retx\":{},\"link_acks\":{},\"link_drops\":{},\"provision_ok\":{},\"stale_events\":{},\"timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{}}}}}",
+            "],\"metrics\":{{\"frames_tx\":{},\"frames_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"binds_ok\":{},\"binds_fail\":{},\"resumes_ok\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"cmd_acks\":{},\"done_rx\":{},\"done_errors\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"link_retx\":{},\"link_acks\":{},\"link_drops\":{},\"bus_contention\":{},\"bus_deferrals\":{},\"bus_poll_drops\":{},\"bus_busy_ms\":{},\"provision_ok\":{},\"stale_events\":{},\"timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{}}}}}",
             m.frames_tx,
             m.frames_rx,
             m.drops,
@@ -61,6 +61,10 @@ impl RunOutcome {
             m.link_retx,
             m.link_acks,
             m.link_drops,
+            m.bus_contention,
+            m.bus_deferrals,
+            m.bus_poll_drops,
+            m.bus_busy_ms,
             bind_sum(&self.snapshot, |c| c.provision_ok),
             bind_sum(&self.snapshot, |c| c.stale_events),
             bind_sum(&self.snapshot, |c| c.session_timeouts),

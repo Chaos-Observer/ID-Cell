@@ -434,6 +434,8 @@ pub struct DeviceSpec {
     pub relay: bool,
     /// 协议档：0=STD（默认），1=RT（实时）。写入帧头 PROF 字段。
     pub prof: u8,
+    /// 共享总线主站：轮询窗口内只有主站能主动发起，从站需被点名后应答。
+    pub bus_master: bool,
     /// 应用层行为规则（计算 / 数据使用）。
     pub rules: Vec<LogicRule>,
 }
@@ -453,6 +455,7 @@ impl DeviceSpec {
             preempt: false,
             relay: false,
             prof: 0,
+            bus_master: false,
             rules: Vec::new(),
         }
     }
@@ -518,6 +521,8 @@ pub struct Device {
     pub relay: bool,
     /// 协议档：0=STD，1=RT；写到出站帧头的 PROF 字节。
     pub prof: u8,
+    /// 共享总线主站标记（World 的轮询仲裁使用）。
+    pub bus_master: bool,
     /// 应用层行为规则与运行状态（规则触发节流 / 上次输出）。
     pub rules: Vec<LogicRule>,
     pub logic_state: Vec<LogicState>,
@@ -602,6 +607,7 @@ impl Device {
             preempt: spec.preempt,
             relay: spec.relay,
             prof: spec.prof,
+            bus_master: spec.bus_master,
             logic_state: vec![LogicState::default(); spec.rules.len()],
             rules: spec.rules,
             queries: BTreeMap::new(),

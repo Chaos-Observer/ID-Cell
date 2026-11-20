@@ -1,0 +1,52 @@
+{
+  "name": "CAN 多主总线：共享介质与仲裁排队",
+  "duration_ms": 6000,
+  "seed": 43,
+  "key": "idcell-lab-key",
+  "require_link": true,
+  "max_hops": 2,
+  "link": { "media": "can", "delay_ms": 2 },
+  "devices": [
+    {
+      "name": "can-app",
+      "did": "00000000-00000091",
+      "mode": "consumer",
+      "reqs": [
+        { "qty": "temperature", "unit": "C", "want_ms": 80, "stale_ms": 1200 }
+      ]
+    },
+    {
+      "name": "can-node-a",
+      "did": "00000000-00000092",
+      "mode": "provider",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "节点A温度", "qty": "temperature", "unit": "C", "dtype": "f64", "t_prod_ms": 80, "stale_ms": 1200 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 30.0, "amplitude": 3.0, "period_ms": 2600 }
+      ]
+    },
+    {
+      "name": "can-node-b",
+      "did": "00000000-00000093",
+      "mode": "provider",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "节点B温度", "qty": "temperature", "unit": "C", "dtype": "f64", "t_prod_ms": 80, "stale_ms": 1200 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 34.0, "amplitude": 3.0, "period_ms": 2200 }
+      ]
+    }
+  ],
+  "links": [
+    { "a": "can-app", "b": "can-node-a", "media": "can", "topology": "multi_master", "baud": 500000 },
+    { "a": "can-app", "b": "can-node-b", "media": "can", "topology": "multi_master", "baud": 500000 }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "can-app", "peer": "can-node-a", "stage": "active", "description": "CAN 节点 A 完成绑定" },
+    { "kind": "stage", "device": "can-app", "peer": "can-node-b", "stage": "active", "description": "CAN 节点 B 完成绑定" },
+    { "kind": "events_rx", "op": ">=", "value": 10, "description": "多主节点数据都能到达" },
+    { "kind": "bus_busy_ms", "op": ">=", "value": 5, "description": "CAN 总线存在实际占用" },
+    { "kind": "bus_deferrals", "op": ">=", "value": 0, "tolerance": 0.0, "description": "总线忙时排队（可能为 0）" }
+  ]
+}

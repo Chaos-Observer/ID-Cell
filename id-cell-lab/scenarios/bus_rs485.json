@@ -1,0 +1,65 @@
+{
+  "name": "RS-485 主从轮询总线：主站点名、从站应答",
+  "duration_ms": 6000,
+  "seed": 41,
+  "key": "idcell-lab-key",
+  "require_link": true,
+  "max_hops": 2,
+  "link": { "media": "rs485", "delay_ms": 3 },
+  "devices": [
+    {
+      "name": "bus-master",
+      "did": "00000000-00000081",
+      "mode": "consumer",
+      "bus_master": true,
+      "reqs": [
+        { "qty": "temperature", "unit": "C", "want_ms": 100, "stale_ms": 1500 }
+      ]
+    },
+    {
+      "name": "slave-a",
+      "did": "00000000-00000082",
+      "mode": "provider",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "水温A", "qty": "temperature", "unit": "C", "dtype": "f64", "t_prod_ms": 100, "stale_ms": 1500 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 22.0, "amplitude": 2.0, "period_ms": 3000 }
+      ]
+    },
+    {
+      "name": "slave-b",
+      "did": "00000000-00000083",
+      "mode": "provider",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "水温B", "qty": "temperature", "unit": "C", "dtype": "f64", "t_prod_ms": 100, "stale_ms": 1500 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 26.0, "amplitude": 2.0, "period_ms": 2500 }
+      ]
+    },
+    {
+      "name": "slave-c",
+      "did": "00000000-00000084",
+      "mode": "provider",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "水温C", "qty": "temperature", "unit": "C", "dtype": "f64", "t_prod_ms": 100, "stale_ms": 1500 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 28.0, "amplitude": 2.0, "period_ms": 2800 }
+      ]
+    }
+  ],
+  "links": [
+    { "a": "bus-master", "b": "slave-a", "media": "rs485", "topology": "multi_drop", "baud": 115200, "poll_ms": 1500 },
+    { "a": "bus-master", "b": "slave-b", "media": "rs485", "topology": "multi_drop", "baud": 115200, "poll_ms": 1500 },
+    { "a": "slave-a", "b": "slave-c", "media": "rs485", "topology": "multi_drop", "baud": 115200 }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "bus-master", "peer": "slave-a", "stage": "active", "description": "主站与从站 A 建立会话" },
+    { "kind": "stage", "device": "bus-master", "peer": "slave-b", "stage": "active", "description": "主站与从站 B 建立会话" },
+    { "kind": "stage", "device": "bus-master", "peer": "slave-c", "stage": "active", "description": "共享总线让非直连的从站 C 也能被主站发现" },
+    { "kind": "events_rx", "op": ">=", "value": 15, "description": "三个从站的数据持续到达" },
+    { "kind": "bus_busy_ms", "op": ">=", "value": 10, "description": "总线被实际占用" }
+  ]
+}

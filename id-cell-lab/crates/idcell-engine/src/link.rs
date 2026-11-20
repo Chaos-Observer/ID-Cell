@@ -31,7 +31,8 @@ pub const MEDIA_CATALOG: &[MediaSpec] = &[
     MediaSpec { id: "ipc", label: "进程间 IPC", class: "local", mtu: 0, delay_ms: 0, jitter_ms: 0, uplink_kbps: 0, downlink_kbps: 0, t_link_min_ms: 0, topology: "p2p", host_proxy: false, segment: false, baud: 0 },
     MediaSpec { id: "uart", label: "串口 UART", class: "serial", mtu: 512, delay_ms: 2, jitter_ms: 0, uplink_kbps: 115, downlink_kbps: 115, t_link_min_ms: 5, topology: "p2p", host_proxy: false, segment: false, baud: 115_200 },
     MediaSpec { id: "rs485", label: "RS-485 总线", class: "serial", mtu: 512, delay_ms: 3, jitter_ms: 0, uplink_kbps: 115, downlink_kbps: 115, t_link_min_ms: 5, topology: "multi_drop", host_proxy: false, segment: false, baud: 115_200 },
-    MediaSpec { id: "can", label: "CAN 总线", class: "bus", mtu: 8, delay_ms: 2, jitter_ms: 0, uplink_kbps: 1000, downlink_kbps: 1000, t_link_min_ms: 2, topology: "multi_master", host_proxy: false, segment: false, baud: 500_000 },
+    // CAN 单帧 8B，协议帧通过 ISO-TP 分段/重组，因此 segment=true 按整帧语义传递。
+    MediaSpec { id: "can", label: "CAN 总线", class: "bus", mtu: 8, delay_ms: 2, jitter_ms: 0, uplink_kbps: 1000, downlink_kbps: 1000, t_link_min_ms: 2, topology: "multi_master", host_proxy: false, segment: true, baud: 500_000 },
     MediaSpec { id: "usb", label: "USB", class: "bus", mtu: 1024, delay_ms: 1, jitter_ms: 0, uplink_kbps: 12_000, downlink_kbps: 12_000, t_link_min_ms: 1, topology: "p2p", host_proxy: true, segment: false, baud: 0 },
     MediaSpec { id: "ethernet", label: "以太网", class: "lan", mtu: 1500, delay_ms: 1, jitter_ms: 0, uplink_kbps: 0, downlink_kbps: 0, t_link_min_ms: 1, topology: "switched", host_proxy: false, segment: false, baud: 0 },
     MediaSpec { id: "wifi", label: "Wi-Fi", class: "wireless", mtu: 1400, delay_ms: 8, jitter_ms: 6, uplink_kbps: 2000, downlink_kbps: 2000, t_link_min_ms: 10, topology: "star_host_proxy", host_proxy: false, segment: false, baud: 0 },
@@ -42,6 +43,11 @@ pub const MEDIA_CATALOG: &[MediaSpec] = &[
 
 pub fn media_spec(id: &str) -> Option<&'static MediaSpec> {
     MEDIA_CATALOG.iter().find(|m| m.id == id)
+}
+
+/// 是否为共享总线介质：同一段总线上的设备共享带宽并可见彼此的帧。
+pub fn is_bus_media(media: &str) -> bool {
+    matches!(media, "rs485" | "can")
 }
 
 /// 介质目录的 JSON（供前端与外部工具读取，避免前后端各维护一份）。
@@ -88,6 +94,9 @@ pub struct LinkConfig {
     pub segment: bool,
     /// 串口/CAN 的物理波特率/位速率；0 表示不适用。
     pub baud: u32,
+    /// 主从轮询窗口（ms）：>0 时仅主站可自由发送，从站须在窗口内被点名过才能应答。
+    /// 典型用于 RS-485/Modbus 的半双工总线。
+    pub poll_ms: u32,
 }
 
 impl Default for LinkConfig {
@@ -107,6 +116,7 @@ impl Default for LinkConfig {
             downlink_kbps: 0,
             segment: false,
             baud: 0,
+            poll_ms: 0,
         }
     }
 }
@@ -130,6 +140,7 @@ impl LinkConfig {
                 downlink_kbps: m.downlink_kbps,
                 segment: m.segment,
                 baud: m.baud,
+                poll_ms: 0,
             },
             None => LinkConfig {
                 media: media.to_string(),
@@ -161,6 +172,8 @@ pub struct Link {
     /// 最近一次传输占满链路后的空闲时刻（a→b / b→a）
     pub next_free_ab_ms: u64,
     pub next_free_ba_ms: u64,
+    /// 共享总线上累计被占用的时间（用于算负载率）。
+    pub busy_ms: u64,
 }
 
 impl Link {
@@ -176,6 +189,7 @@ impl Link {
             bytes: 0,
             next_free_ab_ms: 0,
             next_free_ba_ms: 0,
+            busy_ms: 0,
         }
     }
 
