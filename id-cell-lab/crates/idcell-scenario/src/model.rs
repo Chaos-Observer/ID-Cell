@@ -184,6 +184,10 @@ pub struct LogicDef {
     pub target: String,
     pub output: (u16, u8),
     pub min_interval_ms: u64,
+    /// 阈值死区。
+    pub deadband: f64,
+    /// 条件确认延时（ms）。
+    pub on_delay_ms: u64,
 }
 
 impl LogicDef {
@@ -192,6 +196,10 @@ impl LogicDef {
             name: self.name.clone(),
             kind: if self.kind.eq_ignore_ascii_case("aggregate") {
                 LogicKind::Aggregate
+            } else if self.kind.eq_ignore_ascii_case("rate") {
+                LogicKind::Rate
+            } else if self.kind.eq_ignore_ascii_case("integral") {
+                LogicKind::Integral
             } else {
                 LogicKind::Threshold
             },
@@ -219,6 +227,8 @@ impl LogicDef {
             target: self.target.clone(),
             output: self.output,
             min_interval_ms: self.min_interval_ms,
+            deadband: self.deadband,
+            on_delay_ms: self.on_delay_ms,
         }
     }
 }
@@ -290,6 +300,8 @@ fn parse_logic(v: &Json) -> LogicDef {
         target: v.str_field("target").unwrap_or_default(),
         output: parse_output(v),
         min_interval_ms: v.u64_field("min_interval_ms").unwrap_or(0),
+        deadband: v.f64_field("deadband").unwrap_or(0.0),
+        on_delay_ms: v.u64_field("on_delay_ms").unwrap_or(0),
     }
 }
 
@@ -342,6 +354,8 @@ pub struct DeviceDef {
     pub logic: Vec<LogicDef>,
     pub actuators: Vec<ActDef>,
     pub alarms: Vec<AlarmSpec>,
+    /// 点位历史缓存深度（0 关闭）。
+    pub hist_cap: u32,
 }
 
 impl DeviceDef {
@@ -351,6 +365,7 @@ impl DeviceDef {
         spec.group = self.group;
         spec.start_ms = self.start_ms;
         spec.boot_ms = self.boot_ms;
+        spec.hist_cap = self.hist_cap;
         spec.link_min_ms = self.link_min_ms;
         spec.preempt = self.preempt;
         spec.relay = self.relay;
@@ -745,6 +760,7 @@ fn parse_device(v: &Json, index: usize) -> Result<DeviceDef, String> {
         logic,
         actuators,
         alarms,
+        hist_cap: v.u64_field("hist_cap").unwrap_or(240) as u32,
     })
 }
 

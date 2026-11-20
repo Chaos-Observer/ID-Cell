@@ -1291,6 +1291,28 @@ impl World {
         self.devices.iter().map(|d| d.counters.alarms_cleared).sum()
     }
 
+    /// 点位历史采样条数。
+    pub fn history_count(&self, name: &str, index: u16, sub: u8) -> u64 {
+        self.resolve(name)
+            .and_then(|i| self.devices[i].hist.get(&(index, sub)))
+            .map(|h| h.len() as u64)
+            .unwrap_or(0)
+    }
+
+    /// 点位历史均值（窗口内全部采样）。
+    pub fn history_avg(&self, name: &str, index: u16, sub: u8) -> f64 {
+        let Some(h) = self
+            .resolve(name)
+            .and_then(|i| self.devices[i].hist.get(&(index, sub)))
+        else {
+            return 0.0;
+        };
+        if h.is_empty() {
+            return 0.0;
+        }
+        h.iter().map(|p| p.value).sum::<f64>() / h.len() as f64
+    }
+
     pub fn request_read(&mut self, consumer: &str, provider: &str, index: u16, sub: u8) -> bool {
         let (Some(ci), Some(pi)) = (self.resolve(consumer), self.resolve(provider)) else {
             return false;
@@ -1906,6 +1928,21 @@ impl World {
                     }
                     list
                 },
+                history: d
+                    .hist
+                    .iter()
+                    .map(|(k, dq)| HistView {
+                        index: k.0,
+                        sub: k.1,
+                        points: dq
+                            .iter()
+                            .rev()
+                            .take(32)
+                            .rev()
+                            .map(|p| (p.t_ms, p.value, p.quality))
+                            .collect(),
+                    })
+                    .collect(),
                 sessions,
                 values,
                 queries,
@@ -2016,6 +2053,14 @@ pub struct AlarmView {
     pub since_ms: u64,
 }
 
+/// 点位历史视图（最近若干采样）。
+#[derive(Debug, Clone)]
+pub struct HistView {
+    pub index: u16,
+    pub sub: u8,
+    pub points: Vec<(u64, f64, u8)>,
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceView {
     pub name: String,
@@ -2038,6 +2083,8 @@ pub struct DeviceView {
     pub state_since: u64,
     /// 报警点位与当前等级。
     pub alarms: Vec<AlarmView>,
+    /// 点位历史（每点最近 32 条）。
+    pub history: Vec<HistView>,
     pub sessions: Vec<SessionView>,
     pub values: Vec<ValueView>,
     pub queries: Vec<QueryView>,
@@ -2307,6 +2354,23 @@ impl Snapshot {
                 }
                 s.push(']');
                 s.push('}');
+            }
+            s.push_str("],\"history\":[");
+            for (k, h) in d.history.iter().enumerate() {
+                if k > 0 {
+                    s.push(',');
+                }
+                s.push_str(&format!(
+                    "{{\"index\":{},\"sub\":{},\"points\":[",
+                    h.index, h.sub
+                ));
+                for (j, p) in h.points.iter().enumerate() {
+                    if j > 0 {
+                        s.push(',');
+                    }
+                    s.push_str(&format!("[{},{},{}]", p.0, json_num(round3(p.1)), p.2));
+                }
+                s.push_str("]}");
             }
             s.push_str("],\"alarms\":[");
             for (k, a) in d.alarms.iter().enumerate() {

@@ -10,7 +10,15 @@ use idcell_core::{
     crc16, decode_tlvs, decode_value, encode_value, hmac_sha256, Capability, Did, ErrCode, Frame,
     Requirement, Selector, TlvWriter,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+/// 点位历史采样（应用层趋势）。
+#[derive(Debug, Clone)]
+pub struct HistPoint {
+    pub t_ms: u64,
+    pub value: f64,
+    pub quality: u8,
+}
 
 pub const HEARTBEAT_MS: u64 = 1000;
 pub const LINK_TIMEOUT_MS: u64 = 3000;
@@ -90,6 +98,10 @@ pub enum LogicKind {
     Threshold,
     /// 聚合计算：对若干输入点求 avg/sum/min/max/count，写入输出点。
     Aggregate,
+    /// 变化率：单位时间内的变化量（单位/秒）。
+    Rate,
+    /// 累积量：对输入按时间积分。
+    Integral,
 }
 
 /// 一条设备行为规则。既支持“算完写本地能力点”，也支持“直接控制远端执行器”。
@@ -112,12 +124,24 @@ pub struct LogicRule {
     pub output: (u16, u8),
     /// 触发后的最短静默，防止抖振（0 表示不限制）。
     pub min_interval_ms: u64,
+    /// 阈值死区：回到阈值以内该幅度才复位。
+    pub deadband: f64,
+    /// 条件持续多久才动作（ms）。
+    pub on_delay_ms: u64,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct LogicState {
     pub last_ms: u64,
     pub last_out: Option<f64>,
+    /// 变化率/积分用的上一次输入与时刻。
+    pub last_in: Option<f64>,
+    pub last_in_ms: u64,
+    /// 积分累积量。
+    pub acc: f64,
+    /// 延时确认：候选输出与起始时刻。
+    pub pending: Option<f64>,
+    pub pending_since: u64,
 }
 
 impl Default for PointSim {
@@ -564,6 +588,8 @@ pub struct DeviceSpec {
     pub actuators: BTreeMap<(u16, u8), Actuator>,
     /// 点位报警定义。
     pub alarms: Vec<AlarmDef>,
+    /// 点位历史缓存深度（每条点位保留的采样数）。
+    pub hist_cap: u32,
 }
 
 impl DeviceSpec {
@@ -586,6 +612,7 @@ impl DeviceSpec {
             rules: Vec::new(),
             actuators: BTreeMap::new(),
             alarms: Vec::new(),
+            hist_cap: 240,
         }
     }
 }
@@ -664,6 +691,9 @@ pub struct Device {
     /// 报警定义与当前等级。
     pub alarms: Vec<AlarmDef>,
     pub alarm_states: BTreeMap<(u16, u8), AlarmState>,
+    /// 点位历史环形缓存。
+    pub hist: BTreeMap<(u16, u8), VecDeque<HistPoint>>,
+    pub hist_cap: u32,
     /// 应用层行为规则与运行状态（规则触发节流 / 上次输出）。
     pub rules: Vec<LogicRule>,
     pub logic_state: Vec<LogicState>,
@@ -765,6 +795,8 @@ impl Device {
             sensor_faults: BTreeMap::new(),
             alarms: spec.alarms,
             alarm_states: BTreeMap::new(),
+            hist: BTreeMap::new(),
+            hist_cap: spec.hist_cap,
             logic_state: vec![LogicState::default(); spec.rules.len()],
             rules: spec.rules,
             queries: BTreeMap::new(),
@@ -1592,8 +1624,7 @@ impl Device {
         self.update_actuators(now);
         self.update_simulated_points(now);
         self.update_alarms(now);
-        self.update_state(now);
-        if self.awake && self.rx_on {
+        self.update_state(now);        if self.awake && self.rx_on {
             self.maybe_discover(now, &mut out);
         }
         self.check_retries(now, &mut out);
@@ -1725,6 +1756,7 @@ impl Device {
                     pt.ts_ms = now;
                 }
             }
+            self.record_hist(key, now);
             if p >= 1.0 {
                 self.act_states.remove(&key);
             }
@@ -1896,6 +1928,27 @@ impl Device {
         }
     }
 
+    /// 记录点位历史（环形缓存），供趋势回放与统计。
+    fn record_hist(&mut self, key: (u16, u8), now: u64) {
+        if self.hist_cap == 0 {
+            return;
+        }
+        let Some(p) = self.points.get(&key) else {
+            return;
+        };
+        let point = HistPoint {
+            t_ms: now,
+            value: p.value,
+            quality: p.quality,
+        };
+        let cap = self.hist_cap as usize;
+        let dq = self.hist.entry(key).or_default();
+        if dq.len() >= cap {
+            dq.pop_front();
+        }
+        dq.push_back(point);
+    }
+
     fn update_simulated_points(&mut self, now: u64) {
         // 可写点代表执行器保持值：不叠加波形，但持续刷新时标，避免被误判为过期。
         let writable: Vec<(u16, u8)> = self
@@ -1969,6 +2022,7 @@ impl Device {
                     p.quality = q;
                 }
             }
+            self.record_hist(key, now);
         }
     }
 
@@ -3722,6 +3776,7 @@ impl Device {
             p.quality = quality::GOOD;
         }
         self.counters.writes_ok += 1;
+        self.record_hist((index, sub), now);
         self.update_alarms(now);
         if let Some(o) = self.owner.as_mut() {
             o.expires_ms = now + DEFAULT_TTL_MS as u64;
@@ -3817,32 +3872,79 @@ impl Device {
         self.evaluate_logic(now, out);
     }
 
-    /// 收到新数据后执行设备行为规则：先算聚合，再跑阈值，命中则写本地点或远端执行器。
+    /// 收到新数据后执行设备行为规则：先算聚合/变化率，再跑阈值，命中则写本地点或远端执行器。
     fn evaluate_logic(&mut self, now: u64, out: &mut Vec<Action>) {
         if self.rules.is_empty() {
             return;
         }
         let rules = self.rules.clone();
         for (i, rule) in rules.iter().enumerate() {
-            let state = self.logic_state[i].clone();
+            let mut state = self.logic_state[i].clone();
             if rule.min_interval_ms > 0
                 && state.last_ms != 0
                 && now < state.last_ms + rule.min_interval_ms
             {
                 continue;
             }
-            let Some(value) = self.rule_value(rule) else {
+            let value = match rule.kind {
+                LogicKind::Rate => {
+                    // 变化率（单位/秒）：用上一次输入与时间差计算。
+                    let Some(v) = rule.sources.first().and_then(|k| self.point_read(k)) else {
+                        continue;
+                    };
+                    let val = match state.last_in {
+                        Some(prev) if now > state.last_in_ms => {
+                            Some((v - prev) / ((now - state.last_in_ms) as f64 / 1000.0))
+                        }
+                        _ => None,
+                    };
+                    state.last_in = Some(v);
+                    state.last_in_ms = now;
+                    val
+                }
+                LogicKind::Integral => {
+                    // 累积量：按时间对输入积分。
+                    let Some(v) = rule.sources.first().and_then(|k| self.point_read(k)) else {
+                        continue;
+                    };
+                    if state.last_in.is_some() && now > state.last_in_ms {
+                        state.acc += v * ((now - state.last_in_ms) as f64 / 1000.0);
+                    }
+                    state.last_in = Some(v);
+                    state.last_in_ms = now;
+                    Some(state.acc)
+                }
+                _ => self.rule_value(rule, &state),
+            };
+            let Some(value) = value else {
+                self.logic_state[i] = state;
                 continue;
             };
+            // 延时确认：输出需要变化时，条件需持续 on_delay_ms。
+            if rule.on_delay_ms > 0 && state.last_out != Some(value) {
+                if state.pending != Some(value) {
+                    state.pending = Some(value);
+                    state.pending_since = now;
+                    self.logic_state[i] = state;
+                    continue;
+                }
+                if now.saturating_sub(state.pending_since) < rule.on_delay_ms {
+                    self.logic_state[i] = state;
+                    continue;
+                }
+            }
             if state
                 .last_out
                 .map(|v| (v - value).abs() < 1e-9)
                 .unwrap_or(false)
             {
+                self.logic_state[i] = state;
                 continue;
             }
-            self.logic_state[i].last_ms = now;
-            self.logic_state[i].last_out = Some(value);
+            state.last_ms = now;
+            state.last_out = Some(value);
+            state.pending = None;
+            self.logic_state[i] = state;
             self.counters.logic_fired += 1;
             let (index, sub) = rule.output;
             if rule.target.is_empty() {
@@ -3868,23 +3970,42 @@ impl Device {
         }
     }
 
-    /// 计算一条规则的输出值；输入优先取接收缓存，本地能力点作为兜底（支持规则级联）。
-    fn rule_value(&self, rule: &LogicRule) -> Option<f64> {
-        let read = |key: &(u16, u8)| -> Option<f64> {
-            if let Some(v) = self.recv.get(key) {
-                if v.stale {
-                    return None;
-                }
-                return Some(v.value);
+    /// 读取点位：输入优先取接收缓存，本地能力点作为兜底（支持规则级联）。
+    fn point_read(&self, key: &(u16, u8)) -> Option<f64> {
+        if let Some(v) = self.recv.get(key) {
+            if v.stale {
+                return None;
             }
-            self.points.get(key).map(|p| p.value)
-        };
+            return Some(v.value);
+        }
+        self.points.get(key).map(|p| p.value)
+    }
+
+    /// 计算阈值/聚合规则的输出值；阈值支持死区，避免在临界点抖动。
+    fn rule_value(&self, rule: &LogicRule, state: &LogicState) -> Option<f64> {
+        let read = |key: &(u16, u8)| self.point_read(key);
         match rule.kind {
             LogicKind::Threshold => {
                 let v = read(rule.sources.first()?)?;
+                let was_on = state
+                    .last_out
+                    .map(|o| (o - rule.on_value).abs() < 1e-9)
+                    .unwrap_or(false);
                 let hit = match rule.op {
-                    1 => v > rule.threshold,
-                    2 => v >= rule.threshold,
+                    1 => {
+                        if was_on {
+                            v > rule.threshold - rule.deadband
+                        } else {
+                            v > rule.threshold + rule.deadband
+                        }
+                    }
+                    2 => {
+                        if was_on {
+                            v >= rule.threshold - rule.deadband
+                        } else {
+                            v >= rule.threshold + rule.deadband
+                        }
+                    }
                     3 => v < rule.threshold,
                     4 => v <= rule.threshold,
                     5 => (v - rule.threshold).abs() < 1e-9,
@@ -3906,6 +4027,7 @@ impl Device {
                     _ => vals.iter().sum::<f64>() / vals.len() as f64,
                 })
             }
+            LogicKind::Rate | LogicKind::Integral => None,
         }
     }
 

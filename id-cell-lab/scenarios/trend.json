@@ -1,0 +1,56 @@
+{
+  "name": "计算规则与历史趋势：死区、确认延时、历史缓存",
+  "duration_ms": 6000,
+  "seed": 47,
+  "key": "idcell-lab-key",
+  "require_link": true,
+  "link": { "delay_ms": 2 },
+  "devices": [
+    {
+      "name": "temp-01",
+      "did": "00000000-00000131",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "温度", "qty": "temperature", "unit": "C", "dtype": "f64", "t_prod_ms": 100, "stale_ms": 2000 },
+        { "index": 2, "sub": 0, "label": "输出", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 3, "range": [0, 100], "t_prod_ms": 100, "stale_ms": 2000 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 20.0, "amplitude": 5.0, "period_ms": 4000, "noise": 0.02 },
+        { "index": 2, "sub": 0, "base": 0.0, "amplitude": 0.0, "period_ms": 1000 }
+      ]
+    },
+    {
+      "name": "ctrl-01",
+      "did": "00000000-00000132",
+      "reqs": [
+        { "qty": "temperature", "unit": "C", "want_ms": 100, "stale_ms": 2000 },
+        { "qty": "ratio", "unit": "%", "range": [0, 100], "want_ms": 100, "stale_ms": 2000 }
+      ],
+      "logic": [
+        {
+          "name": "deadband-ctl",
+          "kind": "threshold",
+          "input": "1.0",
+          "op": ">",
+          "threshold": 24,
+          "deadband": 1,
+          "on_delay_ms": 200,
+          "on": 100,
+          "off": 0,
+          "target": "temp-01",
+          "output": "2.0",
+          "min_interval_ms": 300
+        }
+      ]
+    }
+  ],
+  "links": [
+    { "a": "temp-01", "b": "ctrl-01" }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "ctrl-01", "peer": "temp-01", "stage": "active", "description": "控制器完成绑定" },
+    { "kind": "history_count", "device": "temp-01", "index": 1, "sub": 0, "op": ">=", "value": 20, "description": "点位历史持续采样" },
+    { "kind": "history_avg", "device": "temp-01", "index": 1, "sub": 0, "op": ">=", "value": 15, "description": "历史均值落在波形范围内（下界）" },
+    { "kind": "history_avg", "device": "temp-01", "index": 1, "sub": 0, "op": "<=", "value": 25, "description": "历史均值落在波形范围内（上界）" },
+    { "kind": "history_count", "device": "temp-01", "index": 2, "sub": 0, "op": ">=", "value": 1, "description": "写入点同样进入历史" }
+  ]
+}

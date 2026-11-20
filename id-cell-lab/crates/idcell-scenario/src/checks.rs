@@ -173,6 +173,22 @@ pub fn evaluate_one(world: &World, def: &AssertDef) -> AssertResult {
             result.passed = ok >= need;
             result.detail = format!("binds_ok={ok}，期望 >= {need}");
         }
+        "history_count" => {
+            let n = world.history_count(&def.device, def.index, def.sub);
+            result.passed = compare(&def.op, n as f64, def.value, def.tolerance);
+            result.detail = format!(
+                "{} 点 ({},{}) 历史 {} 条 {} {}",
+                def.device, def.index, def.sub, n, def.op, def.value
+            );
+        }
+        "history_avg" => {
+            let avg = world.history_avg(&def.device, def.index, def.sub);
+            result.passed = compare(&def.op, avg, def.value, def.tolerance);
+            result.detail = format!(
+                "{} 点 ({},{}) 历史均值 {:.3} {} {:.3}",
+                def.device, def.index, def.sub, avg, def.op, def.value
+            );
+        }
         "alarm" => {
             let level = world.alarm_level(&def.device, def.index, def.sub) as f64;
             result.passed = compare(&def.op, level, def.value, def.tolerance);
