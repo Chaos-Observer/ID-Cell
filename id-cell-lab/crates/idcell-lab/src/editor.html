@@ -424,8 +424,8 @@ const MEDIA_PRESETS = {
   loopback: { label: "本机回环", class: "local", delay_ms: 0, jitter_ms: 0, mtu: 0, uplink_kbps: 0, downlink_kbps: 0, t_link_min_ms: 0, topology: "p2p", host_proxy: false, segment: false },
   ipc:      { label: "进程间 IPC", class: "local", delay_ms: 0, jitter_ms: 0, mtu: 0, uplink_kbps: 0, downlink_kbps: 0, t_link_min_ms: 0, topology: "p2p", host_proxy: false, segment: false },
   uart:     { label: "串口 UART", class: "serial", delay_ms: 2, jitter_ms: 0, mtu: 512, uplink_kbps: 115, downlink_kbps: 115, t_link_min_ms: 5, topology: "p2p", host_proxy: false, segment: false, baud: 115200 },
-  rs485:    { label: "RS-485 总线", class: "serial", delay_ms: 3, jitter_ms: 0, mtu: 512, uplink_kbps: 115, downlink_kbps: 115, t_link_min_ms: 5, topology: "multi_drop", host_proxy: false, segment: false, baud: 115200 },
-  can:      { label: "CAN 总线", class: "bus", delay_ms: 2, jitter_ms: 0, mtu: 8, uplink_kbps: 1000, downlink_kbps: 1000, t_link_min_ms: 2, topology: "multi_master", host_proxy: false, segment: false, baud: 500000 },
+  rs485:    { label: "RS-485 总线", class: "serial", delay_ms: 3, jitter_ms: 0, mtu: 512, uplink_kbps: 115, downlink_kbps: 115, t_link_min_ms: 5, topology: "multi_drop", host_proxy: false, segment: false, baud: 115200, turnaround_ms: 1, inter_frame_ms: 1, echo: true },
+  can:      { label: "CAN 总线", class: "bus", delay_ms: 2, jitter_ms: 0, mtu: 8, uplink_kbps: 500, downlink_kbps: 500, t_link_min_ms: 2, topology: "multi_master", host_proxy: false, segment: true, baud: 500000 },
   usb:      { label: "USB", class: "bus", delay_ms: 1, jitter_ms: 0, mtu: 1024, uplink_kbps: 12000, downlink_kbps: 12000, t_link_min_ms: 1, topology: "p2p", host_proxy: true, segment: false },
   ethernet: { label: "以太网", class: "lan", delay_ms: 1, jitter_ms: 0, mtu: 1500, uplink_kbps: 0, downlink_kbps: 0, t_link_min_ms: 1, topology: "switched", host_proxy: false, segment: false },
   wifi:     { label: "Wi-Fi", class: "wireless", delay_ms: 8, jitter_ms: 6, mtu: 1400, uplink_kbps: 2000, downlink_kbps: 2000, t_link_min_ms: 10, topology: "star_host_proxy", host_proxy: false, segment: false },
@@ -725,6 +725,8 @@ function loadScenario(obj) {
       mode,
       preempt: !!d.preempt,
       relay: !!d.relay,
+      bus_master: !!d.bus_master,
+      bus_priority: d.bus_priority != null ? +d.bus_priority : 16,
       prof: d.protocol === "rt" ? 1 : (+d.prof === 1 ? 1 : 0),
       caps: (d.caps || []).map(normalizeCap),
       reqs: (d.reqs || []).map(normalizeReq),
@@ -754,7 +756,11 @@ function loadScenario(obj) {
       topology: l.topology || preset.topology,
       host_proxy: l.host_proxy != null ? !!l.host_proxy : preset.host_proxy,
       segment: l.segment != null ? !!l.segment : !!preset.segment,
-      baud: l.baud != null ? +l.baud : (preset.baud || 0)
+      baud: l.baud != null ? +l.baud : (preset.baud || 0),
+      poll_ms: l.poll_ms != null ? +l.poll_ms : 0,
+      turnaround_ms: l.turnaround_ms != null ? +l.turnaround_ms : (preset.turnaround_ms || 0),
+      inter_frame_ms: l.inter_frame_ms != null ? +l.inter_frame_ms : (preset.inter_frame_ms || 0),
+      echo: l.echo != null ? !!l.echo : !!preset.echo
     }));
   }
   G.nodes.forEach((n, i) => {
@@ -791,6 +797,8 @@ function buildScenario() {
     const d = { name: n.name, did: n.did, group: +n.group || 0, start_ms: +n.start_ms || 0, mode: n.mode };
     if (n.preempt) d.preempt = true;
     if (n.relay) d.relay = true;
+    if (n.bus_master) d.bus_master = true;
+    if (+n.bus_priority !== 16) d.bus_priority = +n.bus_priority;
     if (+n.prof === 1) d.protocol = "rt";
     if (n.caps.length) {
       d.caps = n.caps.map(c => {
@@ -861,7 +869,11 @@ function buildScenario() {
       t_link_min_ms: +l.t_link_min_ms || 1,
       host_proxy: !!l.host_proxy,
       segment: !!l.segment,
-      baud: +l.baud || 0
+      baud: +l.baud || 0,
+      poll_ms: +l.poll_ms || 0,
+      turnaround_ms: +l.turnaround_ms || 0,
+      inter_frame_ms: +l.inter_frame_ms || 0,
+      echo: !!l.echo
     };
   }).filter(Boolean);
   const out = {
@@ -1950,6 +1962,12 @@ function nodeHtml(n) {
           <span class="dim">允许转发其它设备的帧（多跳网关）</span>
         </span>
       </label>
+      <label class="field">总线优先级（0 最高）
+        <input id="nd-busprio" type="number" min="0" max="255" value="${n.bus_priority != null ? n.bus_priority : 16}">
+      </label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:6px;padding-top:14px">
+        <input id="nd-busmaster" type="checkbox" style="width:auto"${n.bus_master ? " checked" : ""}>总线主站（轮询发起方）
+      </label>
     </div>
     <div class="insp-sec">
       <h3>能力点 <button data-add="caps">+ 添加</button></h3>
@@ -2025,6 +2043,14 @@ function bindNode(n) {
   });
   box.querySelector("#nd-relay").addEventListener("change", e => {
     n.relay = e.target.checked;
+    markDirty();
+  });
+  box.querySelector("#nd-busprio").addEventListener("input", e => {
+    n.bus_priority = Math.max(0, Math.min(255, parseInt(e.target.value || "16", 10) || 0));
+    markDirty();
+  });
+  box.querySelector("#nd-busmaster").addEventListener("change", e => {
+    n.bus_master = e.target.checked;
     markDirty();
   });
 
@@ -2143,6 +2169,18 @@ function linkHtml(l, a, b) {
       <label class="field">最小链路周期 ms
         <input data-f="t_link_min_ms" type="number" value="${l.t_link_min_ms}">
       </label>
+      <label class="field">轮询窗口 ms（0 关闭）
+        <input data-f="poll_ms" type="number" value="${l.poll_ms || 0}">
+      </label>
+      <label class="field">收发转向 ms
+        <input data-f="turnaround_ms" type="number" value="${l.turnaround_ms || 0}">
+      </label>
+      <label class="field">帧间静默 ms
+        <input data-f="inter_frame_ms" type="number" value="${l.inter_frame_ms || 0}">
+      </label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:6px;padding-top:14px">
+        <input data-f="echo" type="checkbox" ${l.echo ? "checked" : ""} style="width:auto">半双工自听
+      </label>
       <label class="field" style="flex-direction:row;align-items:center;gap:6px;padding-top:14px">
         <input data-f="host_proxy" type="checkbox" ${l.host_proxy ? "checked" : ""} style="width:auto">主机代发
       </label>
@@ -2185,6 +2223,10 @@ function bindLink(l) {
         l.baud = parseFloat(el.value || "0") || 0;
         if (l.media === "uart" || l.media === "rs485") {
           const k = Math.max(1, Math.round(l.baud * 0.8 / 1000));
+          l.uplink_kbps = k;
+          l.downlink_kbps = k;
+        } else if (l.media === "can") {
+          const k = Math.max(1, Math.round(l.baud / 1000));
           l.uplink_kbps = k;
           l.downlink_kbps = k;
         }

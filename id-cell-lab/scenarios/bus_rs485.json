@@ -60,6 +60,9 @@
     { "kind": "stage", "device": "bus-master", "peer": "slave-b", "stage": "active", "description": "主站与从站 B 建立会话" },
     { "kind": "stage", "device": "bus-master", "peer": "slave-c", "stage": "active", "description": "共享总线让非直连的从站 C 也能被主站发现" },
     { "kind": "events_rx", "op": ">=", "value": 15, "description": "三个从站的数据持续到达" },
-    { "kind": "bus_busy_ms", "op": ">=", "value": 10, "description": "总线被实际占用" }
+    { "kind": "bus_busy_ms", "op": ">=", "value": 10, "description": "总线被实际占用" },
+    { "kind": "bus_turnarounds", "op": ">=", "value": 1, "description": "主从应答发生收发转向" },
+    { "kind": "bus_echoes", "op": ">=", "value": 10, "description": "发送方在介质上自听（半双工回显）" },
+    { "kind": "medium_count", "op": ">=", "value": 10, "description": "介质传播记录可见" }
   ]
 }

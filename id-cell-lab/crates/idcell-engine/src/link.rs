@@ -97,6 +97,12 @@ pub struct LinkConfig {
     /// 主从轮询窗口（ms）：>0 时仅主站可自由发送，从站须在窗口内被点名过才能应答。
     /// 典型用于 RS-485/Modbus 的半双工总线。
     pub poll_ms: u32,
+    /// 半双工转向时间（ms）：RS-485 收发方向切换的驱动开销。
+    pub turnaround_ms: u32,
+    /// 帧间隔（ms）：上一帧结束到下一帧开始的最小静默（3.5 字符时间）。
+    pub inter_frame_ms: u32,
+    /// 半双工自发自收：发送方在介质上能听到自己的帧（只记录，不投递给协议）。
+    pub echo: bool,
 }
 
 impl Default for LinkConfig {
@@ -117,6 +123,9 @@ impl Default for LinkConfig {
             segment: false,
             baud: 0,
             poll_ms: 0,
+            turnaround_ms: 0,
+            inter_frame_ms: 0,
+            echo: false,
         }
     }
 }
@@ -124,6 +133,12 @@ impl Default for LinkConfig {
 impl LinkConfig {
     /// 按介质目录给出默认参数；未知介质回落为默认链路。
     pub fn media_preset(media: &str) -> LinkConfig {
+        // RS-485 是典型的半双工共享总线：收发转向有驱动开销、帧间需静默、发送方自听。
+        let (turnaround_ms, inter_frame_ms, echo) = if media == "rs485" {
+            (1, 1, true)
+        } else {
+            (0, 0, false)
+        };
         match media_spec(media) {
             Some(m) => LinkConfig {
                 delay_ms: m.delay_ms,
@@ -141,6 +156,9 @@ impl LinkConfig {
                 segment: m.segment,
                 baud: m.baud,
                 poll_ms: 0,
+                turnaround_ms,
+                inter_frame_ms,
+                echo,
             },
             None => LinkConfig {
                 media: media.to_string(),

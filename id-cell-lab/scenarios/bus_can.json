@@ -11,6 +11,7 @@
       "name": "can-app",
       "did": "00000000-00000091",
       "mode": "consumer",
+      "bus_priority": 4,
       "reqs": [
         { "qty": "temperature", "unit": "C", "want_ms": 80, "stale_ms": 1200 }
       ]
@@ -19,6 +20,7 @@
       "name": "can-node-a",
       "did": "00000000-00000092",
       "mode": "provider",
+      "bus_priority": 8,
       "caps": [
         { "index": 1, "sub": 0, "label": "节点A温度", "qty": "temperature", "unit": "C", "dtype": "f64", "t_prod_ms": 80, "stale_ms": 1200 }
       ],
@@ -30,6 +32,7 @@
       "name": "can-node-b",
       "did": "00000000-00000093",
       "mode": "provider",
+      "bus_priority": 20,
       "caps": [
         { "index": 1, "sub": 0, "label": "节点B温度", "qty": "temperature", "unit": "C", "dtype": "f64", "t_prod_ms": 80, "stale_ms": 1200 }
       ],
@@ -47,6 +50,10 @@
     { "kind": "stage", "device": "can-app", "peer": "can-node-b", "stage": "active", "description": "CAN 节点 B 完成绑定" },
     { "kind": "events_rx", "op": ">=", "value": 10, "description": "多主节点数据都能到达" },
     { "kind": "bus_busy_ms", "op": ">=", "value": 5, "description": "CAN 总线存在实际占用" },
-    { "kind": "bus_deferrals", "op": ">=", "value": 0, "tolerance": 0.0, "description": "总线忙时排队（可能为 0）" }
+    { "kind": "bus_deferrals", "op": ">=", "value": 1, "description": "总线忙时帧进入仲裁等待" },
+    { "kind": "bus_arb_won", "op": ">=", "value": 1, "description": "高优先级帧赢得仲裁后继续发送" },
+    { "kind": "bus_arb_lost", "op": ">=", "value": 1, "description": "低优先级帧让行等待" },
+    { "kind": "bus_wait_ms", "op": ">=", "value": 1, "description": "仲裁等待时间被真实计入" },
+    { "kind": "medium_count", "op": ">=", "value": 10, "description": "介质传播记录可见" }
   ]
 }

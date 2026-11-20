@@ -7,6 +7,32 @@ use crate::trace::{json_escape, json_num, TraceEntry, TraceLog};
 use idcell_core::{decode_tlvs, ftype, tlv_type, Did, Frame, TlvWriter};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+/// 单跳链路规划结果。
+enum HopPlan {
+    /// 已排定发送时刻，携带总时延。
+    Delay(u64),
+    /// CAN 仲裁落败：帧进入总线等待队列，由 BusRelease 事件重新调度。
+    Queued,
+}
+
+/// CAN 总线上等待仲裁的一帧。
+#[derive(Debug, Clone)]
+struct BusWait {
+    /// 仲裁键：数值越小优先级越高。
+    arb: u32,
+    /// 入队顺序，用于同优先级先到先发。
+    order: u64,
+    from: usize,
+    to: usize,
+    bytes: Vec<u8>,
+    ftype: u8,
+    fseq: u16,
+    tx_ms: u64,
+    /// 链路基础时延（不含排队与发送）。
+    base_delay: u64,
+    queued_at: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct WorldConfig {
     pub seed: u64,
@@ -49,6 +75,8 @@ enum Event {
     },
     /// 链路 ACK 超时：按 id 取待确认帧重传或放弃。
     LinkAck(u64),
+    /// 共享总线一次传输结束：按仲裁优先级取出下一个等待者。
+    BusRelease(usize),
 }
 
 struct Pending {
@@ -89,6 +117,20 @@ pub struct Metrics {
     pub bus_poll_drops: u64,
     /// 总线累计占用时间（ms），用于算负载率。
     pub bus_busy_ms: u64,
+    /// CAN 仲裁获胜（高优先级先拿到总线）的次数。
+    pub bus_arb_won: u64,
+    /// CAN 仲裁落败（因更高优先级帧先发而等待）的次数。
+    pub bus_arb_lost: u64,
+    /// 总线排队累计等待时间（ms）。
+    pub bus_wait_ms: u64,
+    /// RS-485 收发方向切换次数（主从应答往返）。
+    pub bus_turnarounds: u64,
+    /// 半双工自发自收的帧数（仅介质层记录，不投递给协议）。
+    pub bus_echoes: u64,
+    /// 经过交换/星型中心转发的跳数（存储转发时延）。
+    pub switched_hops: u64,
+    /// 单播累计链路跳数（直连 1 跳，中继按跳累加）。
+    pub unicast_hops: u64,
 }
 
 /// 链路确认时延与重传上限（NFR-026：控制面帧 3 次重传内成功）。
@@ -181,8 +223,9 @@ pub struct World {
     serial: BTreeMap<(usize, usize), u64>,
     /// 最近发出的原始帧（十六进制），供面板做帧级详情
     frames: VecDeque<FrameView>,
-    /// 广播洪泛去重：`(原始 src, seq, query_id)` → 首次转发时刻。
-    flood_seen: BTreeMap<(Did, u16, u32), u64>,
+    /// 广播洪泛去重：`(中继节点, 原始 src, seq, query_id)` → 首次转发时刻。
+    /// 按节点去重，保证多跳（网格）逐级转发，同时抑制环路重复。
+    flood_seen: BTreeMap<(usize, Did, u16, u32), u64>,
     /// 待链路确认的控制面帧。
     link_pending: BTreeMap<u64, LinkPending>,
     next_link_id: u64,
@@ -194,6 +237,12 @@ pub struct World {
     bus_last_tx: BTreeMap<usize, usize>,
     /// 主从轮询：`(总线域, 从站)` → 点名窗口截止时刻。
     bus_poll: BTreeMap<(usize, usize), u64>,
+    /// CAN 仲裁等待队列：总线域 → 按仲裁键排序的待发帧。
+    bus_arb: BTreeMap<usize, Vec<BusWait>>,
+    /// 介质传播记录（最近若干条）：谁在什么介质上、什么时刻、发给了谁、谁听到。
+    medium: VecDeque<MediumView>,
+    /// 介质传播累计条数（含被挤出缓存的记录）。
+    medium_total: u64,
 }
 
 impl World {
@@ -227,6 +276,9 @@ impl World {
             bus_busy_until: BTreeMap::new(),
             bus_last_tx: BTreeMap::new(),
             bus_poll: BTreeMap::new(),
+            bus_arb: BTreeMap::new(),
+            medium: VecDeque::new(),
+            medium_total: 0,
         }
     }
 
@@ -321,6 +373,7 @@ impl World {
                 }
                 Event::Deliver { to, bytes, from } => self.deliver(to, bytes, from),
                 Event::LinkAck(id) => self.on_link_ack_timeout(id),
+                Event::BusRelease(bus) => self.bus_release(bus),
             }
         }
         self.now_ms = target;
@@ -352,6 +405,7 @@ impl World {
             }
             Event::Deliver { to, bytes, from } => self.deliver(to, bytes, from),
             Event::LinkAck(id) => self.on_link_ack_timeout(id),
+            Event::BusRelease(bus) => self.bus_release(bus),
         }
         true
     }
@@ -655,8 +709,12 @@ impl World {
             ));
             return;
         }
-        let Some(delay) = self.hop_plan(from, target, bytes.len(), ft, &from_name, &to_name) else {
-            return;
+        let plan = self.hop_plan(from, target, frame, bytes);
+        let delay = match plan {
+            Some(HopPlan::Delay(d)) => d,
+            // 仲裁等待：帧已进入总线队列，由 BusRelease 事件继续投递。
+            Some(HopPlan::Queued) => return,
+            None => return,
         };
         self.trace.push(TraceEntry {
             t_ms: self.now_ms,
@@ -681,6 +739,7 @@ impl World {
     /// 定向单播：直连优先，否则沿“允许中继”的网关多跳转发。
     fn emit_unicast(&mut self, from: usize, target: usize, frame: &Frame, bytes: &[u8]) {
         if !self.require_link || self.link_index(from, target).is_some() || self.same_bus(from, target) {
+            self.metrics.unicast_hops += 1;
             self.emit_direct(from, target, frame, bytes);
             return;
         }
@@ -708,10 +767,10 @@ impl World {
             let (a, b) = (w[0], w[1]);
             let from_name = self.devices[a].name.clone();
             let to_name = self.devices[b].name.clone();
-            let Some(delay) =
-                self.hop_plan(a, b, bytes.len(), frame.frame_type, &from_name, &to_name)
-            else {
-                return;
+            let delay = match self.hop_plan(a, b, frame, bytes) {
+                Some(HopPlan::Delay(d)) => d,
+                // 多跳途中遇到总线仲裁等待：交由总线队列接续投递。
+                Some(HopPlan::Queued) | None => return,
             };
             self.trace.push(TraceEntry {
                 t_ms: self.now_ms + total,
@@ -735,6 +794,7 @@ impl World {
             ));
         }
         let dest = *path.last().unwrap();
+        self.metrics.unicast_hops += (path.len() - 1) as u64;
         self.push_event(
             self.now_ms + total,
             Event::Deliver {
@@ -745,24 +805,20 @@ impl World {
         );
     }
 
-    /// 单跳链路处理：隔离 / MTU / 丢包 / 时延抖动 / 重排 / 带宽排队 + 指标。
-    fn hop_plan(
-        &mut self,
-        a: usize,
-        b: usize,
-        len: usize,
-        ft: u8,
-        from_name: &str,
-        to_name: &str,
-    ) -> Option<u64> {
+    /// 单跳链路处理：隔离 / MTU / 丢包 / 时延抖动 / 重排 / 带宽排队 / 总线仲裁 + 指标。
+    fn hop_plan(&mut self, a: usize, b: usize, frame: &Frame, bytes: &[u8]) -> Option<HopPlan> {
+        let len = bytes.len();
+        let ft = frame.frame_type;
+        let from_name = self.devices.get(a)?.name.clone();
+        let to_name = self.devices.get(b)?.name.clone();
         let (cfg, partitioned) = self.link_config(a, b);
         if partitioned {
             self.count_drop(a, b);
             self.trace.push(TraceEntry::new(
                 self.now_ms,
                 "drop",
-                from_name,
-                to_name,
+                &from_name,
+                &to_name,
                 ftype::name(ft),
                 "链路隔离，帧被丢弃".to_string(),
             ));
@@ -782,8 +838,8 @@ impl World {
             self.trace.push(TraceEntry::new(
                 self.now_ms,
                 "drop",
-                from_name,
-                to_name,
+                &from_name,
+                &to_name,
                 ftype::name(ft),
                 format!(
                     "{} {} 不足，帧长 {}",
@@ -799,8 +855,8 @@ impl World {
             self.trace.push(TraceEntry::new(
                 self.now_ms,
                 "drop",
-                from_name,
-                to_name,
+                &from_name,
+                &to_name,
                 ftype::name(ft),
                 format!("链路丢包（loss={} ppm）", cfg.loss_ppm),
             ));
@@ -823,8 +879,13 @@ impl World {
             None => true,
         };
         let kbps = cfg.bandwidth_for(from_is_a) as u64;
+        let now = self.now_ms;
+        let mut tx_ms = 0u64;
+        if kbps > 0 {
+            tx_ms = ((len as u64 * 8).div_ceil(kbps)).max(1);
+        }
         if is_bus_media(&cfg.media) {
-            // 共享总线：整段总线串行复用，并叠加主从轮询与争用语义。
+            // 共享总线：整段总线串行复用，并叠加主从轮询、仲裁与半双工语义。
             let bus_map = self.bus_domains();
             let bus = bus_map.get(&b).copied().unwrap_or(b);
             // 轮询窗口是总线级属性：同一段总线上任一链路启用即对整个总线生效。
@@ -862,40 +923,112 @@ impl World {
                     self.trace.push(TraceEntry::new(
                         self.now_ms,
                         "bus_poll",
-                        from_name,
-                        to_name,
+                        &from_name,
+                        &to_name,
                         ftype::name(ft),
                         "轮询窗口外抢发，总线拒绝（从站未被点名）".to_string(),
                     ));
                     return None;
                 }
             }
-            let busy = self.bus_busy_until.get(&bus).copied().unwrap_or(0);
-            if busy > self.now_ms {
+            let is_can = cfg.media == "can"
+                || (cfg.topology == "multi_master" && cfg.media != "rs485");
+            if is_can {
+                // CAN：按仲裁键（帧类型 + 设备优先级 + DID）决定谁先占用总线。
+                let arb = self.frame_arb(a, ft, frame.seq);
+                let busy = self.bus_busy_until.get(&bus).copied().unwrap_or(0);
+                let waiting = self
+                    .bus_arb
+                    .get(&bus)
+                    .map(|q| !q.is_empty())
+                    .unwrap_or(false);
+                if busy <= now && !waiting {
+                    let end = now + tx_ms;
+                    self.bus_busy_until.insert(bus, end);
+                    self.bus_serial.insert(bus, end);
+                    self.bus_last_tx.insert(bus, a);
+                    self.metrics.bus_busy_ms += tx_ms;
+                    if let Some(li) = self.link_index(a, b) {
+                        self.links[li].busy_ms += tx_ms;
+                    }
+                    self.count_tx(a, b, len, ft);
+                    self.record_medium(
+                        now,
+                        &cfg.media,
+                        true,
+                        &from_name,
+                        &to_name,
+                        ft,
+                        frame.seq,
+                        len,
+                        arb,
+                        0,
+                        tx_ms,
+                        "ok",
+                        Some(bus),
+                        b,
+                    );
+                    self.push_event(end, Event::BusRelease(bus));
+                    return Some(HopPlan::Delay(delay + tx_ms));
+                }
+                // 仲裁落败：统计与更高/更低优先级帧的关系后进入等待队列。
+                let mut lost = 0u64;
+                let mut has_higher = false;
+                if let Some(q) = self.bus_arb.get(&bus) {
+                    for w in q {
+                        if w.arb > arb {
+                            lost += 1;
+                        }
+                        if w.arb < arb {
+                            has_higher = true;
+                        }
+                    }
+                }
+                if has_higher {
+                    lost += 1;
+                }
                 self.metrics.bus_deferrals += 1;
-                // 同一发送方连续排队不算争用；不同设备同时抢总线才计一次争用。
-                if self.bus_last_tx.get(&bus) != Some(&a) {
-                    self.metrics.bus_contention += 1;
-                    self.trace.push(TraceEntry::new(
-                        self.now_ms,
-                        "bus_busy",
-                        from_name,
-                        to_name,
-                        ftype::name(ft),
-                        format!("总线忙（剩余 {} ms），按{}", busy - self.now_ms,
-                            if cfg.topology == "multi_master" { "优先级仲裁" } else { "排队" }),
-                    ));
+                self.metrics.bus_arb_lost += lost;
+                let order = self.seq;
+                self.seq += 1;
+                self.bus_arb.entry(bus).or_default().push(BusWait {
+                    arb,
+                    order,
+                    from: a,
+                    to: b,
+                    bytes: bytes.to_vec(),
+                    ftype: ft,
+                    fseq: frame.seq,
+                    tx_ms,
+                    base_delay: delay,
+                    queued_at: now,
+                });
+                self.trace.push(TraceEntry {
+                    t_ms: now,
+                    kind: "bus_arb".into(),
+                    from: from_name,
+                    to: to_name,
+                    ftype: ftype::name(ft).into(),
+                    seq: frame.seq,
+                    detail: format!("仲裁 ID 0x{arb:X} 等待总线（本轮 {} 帧让行）", lost),
+                });
+                return Some(HopPlan::Queued);
+            }
+            // RS-485 半双工：帧间静默 + 收发转向 + 发送方自听。
+            let mut start = now;
+            let free = self.bus_serial.get(&bus).copied().unwrap_or(0);
+            if free > now {
+                start = free + cfg.inter_frame_ms as u64;
+            }
+            if let Some(prev) = self.bus_last_tx.get(&bus).copied() {
+                if prev != a && cfg.turnaround_ms > 0 {
+                    start += cfg.turnaround_ms as u64;
+                    self.metrics.bus_turnarounds += 1;
                 }
             }
-            let mut tx_ms = 0u64;
-            if kbps > 0 {
-                tx_ms = ((len as u64 * 8).div_ceil(kbps)).max(1);
-            }
-            let free = self.bus_serial.get(&bus).copied().unwrap_or(0);
-            let start = self.now_ms.max(free);
-            let queued = start.saturating_sub(self.now_ms);
-            self.metrics.link_queue_ms += queued;
+            let queued = start.saturating_sub(now);
             let end = start + tx_ms;
+            self.metrics.link_queue_ms += queued;
             self.bus_serial.insert(bus, end);
             self.bus_busy_until.insert(bus, end);
             self.bus_last_tx.insert(bus, a);
@@ -903,17 +1036,80 @@ impl World {
             if let Some(li) = self.link_index(a, b) {
                 self.links[li].busy_ms += tx_ms;
             }
-            delay += queued + tx_ms;
-        } else if kbps > 0 {
-            let bits = len as u64 * 8;
-            let tx_ms = bits.div_ceil(kbps).max(1);
+            if cfg.echo {
+                self.metrics.bus_echoes += 1;
+            }
+            self.count_tx(a, b, len, ft);
+            self.record_medium(
+                start,
+                &cfg.media,
+                true,
+                &from_name,
+                &to_name,
+                ft,
+                frame.seq,
+                len,
+                0,
+                queued,
+                tx_ms,
+                "ok",
+                Some(bus),
+                b,
+            );
+            return Some(HopPlan::Delay(delay + queued + tx_ms));
+        }
+        // 交换式/星型中心：每跳叠加存储转发时延。
+        if matches!(cfg.topology.as_str(), "switched" | "star_host_proxy") {
+            delay += 1;
+            self.metrics.switched_hops += 1;
+        }
+        if kbps > 0 {
             let free = self.serial.get(&(a, b)).copied().unwrap_or(0);
-            let start = self.now_ms.max(free);
-            let queued = start.saturating_sub(self.now_ms);
+            let start = now.max(free);
+            let queued = start.saturating_sub(now);
             self.metrics.link_queue_ms += queued;
             self.serial.insert((a, b), start + tx_ms);
             delay += queued + tx_ms;
+            self.record_medium(
+                start,
+                &cfg.media,
+                false,
+                &from_name,
+                &to_name,
+                ft,
+                frame.seq,
+                len,
+                0,
+                queued,
+                tx_ms,
+                "ok",
+                None,
+                b,
+            );
+        } else {
+            self.record_medium(
+                now,
+                &cfg.media,
+                false,
+                &from_name,
+                &to_name,
+                ft,
+                frame.seq,
+                len,
+                0,
+                0,
+                0,
+                "ok",
+                None,
+                b,
+            );
         }
+        self.count_tx(a, b, len, ft);
+        Some(HopPlan::Delay(delay))
+    }
+
+    /// 统计一次真正上介质的发送。
+    fn count_tx(&mut self, a: usize, b: usize, len: usize, ft: u8) {
         self.metrics.frames_tx += 1;
         self.metrics.bytes_tx += len as u64;
         *self.type_counts.entry(ft).or_insert(0) += 1;
@@ -921,7 +1117,158 @@ impl World {
             self.links[li].frames += 1;
             self.links[li].bytes += len as u64;
         }
-        Some(delay)
+    }
+
+    /// CAN 仲裁键：数值越小越优先（控制帧 > 会话帧 > 数据帧，再比设备优先级与 DID）。
+    fn frame_arb(&self, from: usize, ft: u8, _fseq: u16) -> u32 {
+        let class: u32 = match ft {
+            ftype::ACK | ftype::DONE | ftype::ERROR | ftype::PREEMPT | ftype::LEASE => 0,
+            ftype::EVENT => 2,
+            _ => 1,
+        };
+        let pri = self.devices.get(from).map(|d| d.bus_priority).unwrap_or(16) as u32;
+        let did = self.devices.get(from).map(|d| d.did.to_u64()).unwrap_or(0) as u32;
+        (class << 24) | ((pri & 0xFF) << 16) | (did & 0xFFFF)
+    }
+
+    /// 总线一次传输结束：按仲裁优先级取出下一个等待帧继续发送。
+    fn bus_release(&mut self, bus: usize) {
+        let Some(wait) = self.pop_bus_wait(bus) else {
+            return;
+        };
+        let now = self.now_ms;
+        let end = now + wait.tx_ms;
+        self.bus_busy_until.insert(bus, end);
+        self.bus_serial.insert(bus, end);
+        self.bus_last_tx.insert(bus, wait.from);
+        self.metrics.bus_arb_won += 1;
+        self.metrics.bus_wait_ms += now.saturating_sub(wait.queued_at);
+        self.metrics.bus_busy_ms += wait.tx_ms;
+        if let Some(li) = self.link_index(wait.from, wait.to) {
+            self.links[li].busy_ms += wait.tx_ms;
+        }
+        let from_name = self.devices[wait.from].name.clone();
+        let to_name = self.devices[wait.to].name.clone();
+        let media = self.bus_media(bus);
+        self.count_tx(wait.from, wait.to, wait.bytes.len(), wait.ftype);
+        let waited = now.saturating_sub(wait.queued_at);
+        self.record_medium(
+            now,
+            &media,
+            true,
+            &from_name,
+            &to_name,
+            wait.ftype,
+            wait.fseq,
+            wait.bytes.len(),
+            wait.arb,
+            waited,
+            wait.tx_ms,
+            "arb_won",
+            Some(bus),
+            wait.to,
+        );
+        self.trace.push(TraceEntry {
+            t_ms: now,
+            kind: "bus_arb_grant".into(),
+            from: from_name,
+            to: to_name,
+            ftype: ftype::name(wait.ftype).into(),
+            seq: wait.fseq,
+            detail: format!("仲裁 ID 0x{:X} 获得总线，排队 {} ms", wait.arb, waited),
+        });
+        self.push_event(
+            end + wait.base_delay,
+            Event::Deliver {
+                to: wait.to,
+                bytes: wait.bytes,
+                from: Some(wait.from),
+            },
+        );
+        // 无论队列当前是否为空都排一次释放事件：
+        // 传输期间新到达的帧可能刚入队，需要在该次传输结束后继续仲裁。
+        self.push_event(end, Event::BusRelease(bus));
+    }
+
+    fn pop_bus_wait(&mut self, bus: usize) -> Option<BusWait> {
+        let q = self.bus_arb.get_mut(&bus)?;
+        let idx = q
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, w)| (w.arb, w.order))
+            .map(|(i, _)| i)?;
+        Some(q.remove(idx))
+    }
+
+    /// 查找总线域对应的介质名。
+    fn bus_media(&self, bus: usize) -> String {
+        let map = self.bus_domains();
+        self.links
+            .iter()
+            .find(|l| {
+                !l.partitioned
+                    && is_bus_media(&l.cfg.media)
+                    && (map.get(&l.a) == Some(&bus) || map.get(&l.b) == Some(&bus))
+            })
+            .map(|l| l.cfg.media.clone())
+            .unwrap_or_else(|| "can".to_string())
+    }
+
+    /// 记录一条介质传播：谁在何时、通过什么介质、发给了谁、哪些设备听得到。
+    #[allow(clippy::too_many_arguments)]
+    fn record_medium(
+        &mut self,
+        t_ms: u64,
+        media: &str,
+        bus: bool,
+        from: &str,
+        to: &str,
+        ft: u8,
+        seq: u16,
+        len: usize,
+        arb: u32,
+        wait_ms: u64,
+        tx_ms: u64,
+        result: &str,
+        bus_id: Option<usize>,
+        target: usize,
+    ) {
+        let heard = match bus_id {
+            Some(id) => {
+                let map = self.bus_domains();
+                self.devices
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| map.get(i) == Some(&id))
+                    .map(|(_, d)| d.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            }
+            None => self
+                .devices
+                .get(target)
+                .map(|d| d.name.clone())
+                .unwrap_or_default(),
+        };
+        if self.medium.len() >= 240 {
+            self.medium.pop_front();
+        }
+        self.medium.push_back(MediumView {
+            t_ms,
+            media: media.to_string(),
+            bus,
+            from: from.to_string(),
+            to: to.to_string(),
+            ftype: ftype::name(ft).to_string(),
+            seq,
+            len,
+            arb,
+            wait_ms,
+            tx_ms,
+            result: result.to_string(),
+            heard,
+        });
+        self.medium_total += 1;
     }
 
     fn count_drop(&mut self, a: usize, b: usize) {
@@ -982,7 +1329,7 @@ impl World {
                     continue;
                 }
                 let is_dest = n == to;
-                if !is_dest && !self.devices[n].relay {
+                if !is_dest && !self.devices[n].relay && !self.is_topology_hub(n) {
                     continue;
                 }
                 visited.insert(n);
@@ -1005,6 +1352,22 @@ impl World {
             }
         }
         None
+    }
+
+    /// 拓扑中心：星型 AP / 以太网交换机默认具备转发能力（无需显式 relay）。
+    fn is_topology_hub(&self, i: usize) -> bool {
+        let mut n = 0;
+        for l in &self.links {
+            if l.partitioned {
+                continue;
+            }
+            if (l.a == i || l.b == i)
+                && matches!(l.cfg.topology.as_str(), "switched" | "star_host_proxy")
+            {
+                n += 1;
+            }
+        }
+        n >= 2
     }
 
     fn neighbors(&self, i: usize) -> Vec<usize> {
@@ -1060,7 +1423,8 @@ impl World {
                     seq: frame.seq,
                     detail: format!("{} B", bytes.len()),
                 });
-                let is_flood = frame.dst.is_broadcast() && self.devices[to].relay;
+                let is_flood = frame.dst.is_broadcast()
+                    && (self.devices[to].relay || self.is_topology_hub(to));
                 let flood_frame = if is_flood { Some(frame.clone()) } else { None };
                 let actions = self.devices[to].on_frame(self.now_ms, frame);
                 self.apply_actions(to, actions);
@@ -1099,7 +1463,7 @@ impl World {
             ));
             return;
         };
-        let key = (frame.src, frame.seq, query_id_of(&frame.payload));
+        let key = (node, frame.src, frame.seq, query_id_of(&frame.payload));
         if let Some(t) = self.flood_seen.get(&key) {
             if self.now_ms.saturating_sub(*t) < 3000 {
                 return;
@@ -1846,6 +2210,11 @@ impl World {
             .unwrap_or(0)
     }
 
+    /// 介质传播累计条数（断言/接口用）。
+    pub fn medium_total(&self) -> u64 {
+        self.medium_total
+    }
+
     pub fn trace_jsonl(&self) -> String {
         let mut s = String::new();
         for e in self.trace.entries() {
@@ -2045,6 +2414,11 @@ impl World {
                 let skip = self.frames.len().saturating_sub(40);
                 self.frames.iter().skip(skip).cloned().collect()
             },
+            medium: {
+                let skip = self.medium.len().saturating_sub(80);
+                self.medium.iter().skip(skip).cloned().collect()
+            },
+            medium_total: self.medium_total,
         }
     }
 }
@@ -2226,6 +2600,55 @@ pub struct Snapshot {
     pub trace_total: u64,
     pub trace: Vec<TraceEntry>,
     pub frames: Vec<FrameView>,
+    /// 介质传播记录（最近 80 条）。
+    pub medium: Vec<MediumView>,
+    /// 介质传播累计条数。
+    pub medium_total: u64,
+}
+
+/// 介质传播视图：帧何时真正出现在介质上、谁发的、谁听得到。
+#[derive(Debug, Clone)]
+pub struct MediumView {
+    pub t_ms: u64,
+    pub media: String,
+    /// 是否为共享总线（总线上的所有挂接设备都能听到）。
+    pub bus: bool,
+    pub from: String,
+    pub to: String,
+    pub ftype: String,
+    pub seq: u16,
+    pub len: usize,
+    /// CAN 仲裁键（越低优先级越高）；非 CAN 为 0。
+    pub arb: u32,
+    /// 上介质前的等待时间（排队/仲裁/转向）。
+    pub wait_ms: u64,
+    /// 介质占用时长。
+    pub tx_ms: u64,
+    /// ok / arb_won
+    pub result: String,
+    /// 听得到该帧的设备列表（总线为整段，点对点为接收方）。
+    pub heard: String,
+}
+
+impl MediumView {
+    fn to_json(&self) -> String {
+        format!(
+            "{{\"t\":{},\"media\":\"{}\",\"bus\":{},\"from\":\"{}\",\"to\":\"{}\",\"type\":\"{}\",\"seq\":{},\"len\":{},\"arb\":{},\"wait_ms\":{},\"tx_ms\":{},\"result\":\"{}\",\"heard\":\"{}\"}}",
+            self.t_ms,
+            json_escape(&self.media),
+            self.bus,
+            json_escape(&self.from),
+            json_escape(&self.to),
+            json_escape(&self.ftype),
+            self.seq,
+            self.len,
+            self.arb,
+            self.wait_ms,
+            self.tx_ms,
+            json_escape(&self.result),
+            json_escape(&self.heard)
+        )
+    }
 }
 
 impl Snapshot {
@@ -2237,7 +2660,7 @@ impl Snapshot {
         ));
         s.push_str("\"metrics\":{");
         s.push_str(&format!(
-            "\"frames_tx\":{},\"frames_rx\":{},\"bytes_tx\":{},\"bytes_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"latency_samples\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"p50_latency_ms\":{},\"p95_latency_ms\":{},\"p99_latency_ms\":{},\"jitter_ms\":{},\"throughput_kbps\":{},\"queue_ms\":{},\"link_retx\":{},\"link_acks\":{},\"link_drops\":{},\"bus_contention\":{},\"bus_deferrals\":{},\"bus_poll_drops\":{},\"bus_busy_ms\":{}",
+            "\"frames_tx\":{},\"frames_rx\":{},\"bytes_tx\":{},\"bytes_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"latency_samples\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"p50_latency_ms\":{},\"p95_latency_ms\":{},\"p99_latency_ms\":{},\"jitter_ms\":{},\"throughput_kbps\":{},\"queue_ms\":{},\"link_retx\":{},\"link_acks\":{},\"link_drops\":{},\"bus_contention\":{},\"bus_deferrals\":{},\"bus_poll_drops\":{},\"bus_busy_ms\":{},\"bus_arb_won\":{},\"bus_arb_lost\":{},\"bus_wait_ms\":{},\"bus_turnarounds\":{},\"bus_echoes\":{},\"switched_hops\":{},\"unicast_hops\":{},\"medium_count\":{}",
             self.metrics.frames_tx,
             self.metrics.frames_rx,
             self.metrics.bytes_tx,
@@ -2260,7 +2683,15 @@ impl Snapshot {
             self.metrics.bus_contention,
             self.metrics.bus_deferrals,
             self.metrics.bus_poll_drops,
-            self.metrics.bus_busy_ms
+            self.metrics.bus_busy_ms,
+            self.metrics.bus_arb_won,
+            self.metrics.bus_arb_lost,
+            self.metrics.bus_wait_ms,
+            self.metrics.bus_turnarounds,
+            self.metrics.bus_echoes,
+            self.metrics.switched_hops,
+            self.metrics.unicast_hops,
+            self.medium_total
         ));
         s.push_str("},\"devices\":[");
         for (i, d) in self.devices.iter().enumerate() {
@@ -2484,6 +2915,13 @@ impl Snapshot {
                 s.push(',');
             }
             s.push_str(&f.to_json());
+        }
+        s.push_str("],\"medium\":[");
+        for (i, m) in self.medium.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&m.to_json());
         }
         s.push_str("]}");
         s

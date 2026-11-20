@@ -237,6 +237,10 @@
         <h2>帧详情（点击展开十六进制与 TLV）</h2>
         <div class="frames" id="frames"><div class="empty">等待数据…</div></div>
       </section>
+      <section style="margin-top:18px">
+        <h2>介质传播（谁在介质上发了什么、谁听得到）</h2>
+        <div class="frames" id="medium"><div class="empty">等待数据…</div></div>
+      </section>
     </section>
   </div>
 </main>
@@ -289,7 +293,11 @@ function render(data) {
     ["描述重组", sum("desc_reassemble_ok")], ["链路重传", m.link_retx ?? 0], ["入网", sum("provision_ok")],
     ["命令完成", sum("done_rx")], ["命令失败", sum("done_errors")],
     ["配置拒绝", sum("config_rejects")], ["过期事件", sum("stale_events")], ["写拒绝", sum("writes_rejected")],
-    ["查询", sum("queries_sent")], ["应答", sum("replies_rx")]
+    ["查询", sum("queries_sent")], ["应答", sum("replies_rx")],
+    ["总线仲裁胜/负", `${m.bus_arb_won ?? 0}/${m.bus_arb_lost ?? 0}`],
+    ["总线等待", `${m.bus_wait_ms ?? 0}ms`],
+    ["半双工转向", m.bus_turnarounds ?? 0], ["自听回显", m.bus_echoes ?? 0],
+    ["介质传播", m.medium_count ?? 0]
   ];
   document.getElementById("stats").innerHTML = stats.map(([k, v]) =>
     `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
@@ -298,6 +306,7 @@ function render(data) {
   renderLinks(data);
   renderTrace(data);
   renderFrames(data);
+  renderMedium(data);
   renderAssertions(data);
   recordHistory(data);
   drawCharts();
@@ -598,6 +607,19 @@ function renderTrace(data) {
       <span class="d">${esc(t.detail || "")}</span>
     </div>`).join("");
   if (stick) box.scrollTop = 0;
+}
+
+function renderMedium(data) {
+  const box = document.getElementById("medium");
+  const rows = (data.medium || []).slice().reverse();
+  if (rows.length === 0) { box.innerHTML = `<div class="empty">暂无介质传播</div>`; return; }
+  box.innerHTML = rows.map(x => `
+    <div class="tline">
+      <span class="t">${x.t}</span>
+      <span class="k">${x.bus ? "总线" : "链路"}</span>
+      <span class="ty">${esc(x.media)} · ${esc(x.from)}→${esc(x.to)}</span>
+      <span class="d">${esc(x.type)} #${x.seq} · ${x.len}B · 等待 ${x.wait_ms}ms · 占用 ${x.tx_ms}ms${x.arb ? " · 仲裁 0x" + Number(x.arb).toString(16).toUpperCase() : ""} · 听到: ${esc(x.heard)}</span>
+    </div>`).join("");
 }
 
 function postFault(obj) {

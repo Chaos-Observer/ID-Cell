@@ -26,6 +26,12 @@ pub struct LinkSpec {
     pub baud: u32,
     /// 主从轮询窗口（ms）；>0 启用半双工点名语义。
     pub poll_ms: u32,
+    /// 半双工收发转向时间（ms）。
+    pub turnaround_ms: u32,
+    /// 帧间最小静默（ms）。
+    pub inter_frame_ms: u32,
+    /// 半双工自发自收。
+    pub echo: bool,
 }
 
 impl Default for LinkSpec {
@@ -46,6 +52,9 @@ impl Default for LinkSpec {
             segment: false,
             baud: 0,
             poll_ms: 0,
+            turnaround_ms: 0,
+            inter_frame_ms: 0,
+            echo: false,
         }
     }
 }
@@ -68,6 +77,9 @@ impl LinkSpec {
             segment: self.segment,
             baud: self.baud,
             poll_ms: self.poll_ms,
+            turnaround_ms: self.turnaround_ms,
+            inter_frame_ms: self.inter_frame_ms,
+            echo: self.echo,
         }
     }
 
@@ -76,14 +88,18 @@ impl LinkSpec {
         let media = v.str_field("media").unwrap_or_else(|| "loopback".into());
         let p = LinkConfig::media_preset(&media);
         let baud = v.u64_field("baud").unwrap_or(p.baud as u64) as u32;
-        // 串口按 8N1 折算有效带宽；CAN 等总线仍用预设值。
+        // 串口按 8N1 折算有效带宽；CAN 按位速率折算（500 kbit/s ≈ 50 KB/s）。
         let serial_rate = if (media == "uart" || media == "rs485") && baud > 0 {
             ((baud as f64 * 0.8 / 1000.0).round() as u32).max(1)
+        } else if media == "can" && baud > 0 {
+            (baud / 1000).max(1)
         } else {
             p.uplink_kbps
         };
         let serial_rate_down = if (media == "uart" || media == "rs485") && baud > 0 {
             ((baud as f64 * 0.8 / 1000.0).round() as u32).max(1)
+        } else if media == "can" && baud > 0 {
+            (baud / 1000).max(1)
         } else {
             p.downlink_kbps
         };
@@ -103,6 +119,9 @@ impl LinkSpec {
             segment: v.bool_field("segment").unwrap_or(p.segment),
             baud,
             poll_ms: v.u64_field("poll_ms").unwrap_or(0) as u32,
+            turnaround_ms: v.u64_field("turnaround_ms").unwrap_or(p.turnaround_ms as u64) as u32,
+            inter_frame_ms: v.u64_field("inter_frame_ms").unwrap_or(p.inter_frame_ms as u64) as u32,
+            echo: v.bool_field("echo").unwrap_or(p.echo),
         }
     }
 }
@@ -352,6 +371,8 @@ pub struct DeviceDef {
     pub prof: u8,
     /// 是否为共享总线的主站（RS-485/Modbus 轮询发起方）。
     pub bus_master: bool,
+    /// 共享总线发送优先级（0 最高，默认 16）。
+    pub bus_priority: u8,
     pub caps: Vec<CapDef>,
     pub reqs: Vec<ReqDef>,
     pub sims: Vec<SimDef>,
@@ -375,6 +396,7 @@ impl DeviceDef {
         spec.relay = self.relay;
         spec.prof = self.prof;
         spec.bus_master = self.bus_master;
+        spec.bus_priority = self.bus_priority;
         spec.key = self
             .key
             .as_ref()
@@ -763,6 +785,7 @@ fn parse_device(v: &Json, index: usize) -> Result<DeviceDef, String> {
             _ => v.u64_field("prof").unwrap_or(0).min(1) as u8,
         },
         bus_master: v.bool_field("bus_master").unwrap_or(false),
+        bus_priority: v.u64_field("bus_priority").unwrap_or(16) as u8,
         caps,
         reqs,
         sims,

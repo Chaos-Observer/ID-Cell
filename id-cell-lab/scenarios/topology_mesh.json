@@ -1,0 +1,54 @@
+{
+  "name": "网格拓扑：经两级中继多跳可达",
+  "duration_ms": 8000,
+  "seed": 53,
+  "key": "idcell-lab-key",
+  "require_link": true,
+  "max_hops": 6,
+  "link": { "media": "ethernet", "topology": "mesh", "delay_ms": 2 },
+  "devices": [
+    {
+      "name": "mesh-plc",
+      "did": "00000000-000000C1",
+      "mode": "provider",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "管网压力", "qty": "pressure", "unit": "kPa", "dtype": "f64", "t_prod_ms": 100, "stale_ms": 1500 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 320.0, "amplitude": 10.0, "period_ms": 2600 }
+      ]
+    },
+    {
+      "name": "mesh-r1",
+      "did": "00000000-000000C2",
+      "mode": "provider",
+      "relay": true
+    },
+    {
+      "name": "mesh-r2",
+      "did": "00000000-000000C3",
+      "mode": "provider",
+      "relay": true
+    },
+    {
+      "name": "mesh-hmi",
+      "did": "00000000-000000C4",
+      "mode": "consumer",
+      "reqs": [
+        { "qty": "pressure", "unit": "kPa", "want_ms": 100, "stale_ms": 1500 }
+      ]
+    }
+  ],
+  "links": [
+    { "a": "mesh-plc", "b": "mesh-r1", "media": "ethernet", "topology": "mesh", "delay_ms": 2 },
+    { "a": "mesh-r1", "b": "mesh-r2", "media": "ethernet", "topology": "mesh", "delay_ms": 2 },
+    { "a": "mesh-r2", "b": "mesh-hmi", "media": "ethernet", "topology": "mesh", "delay_ms": 2 }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "mesh-hmi", "peer": "mesh-plc", "stage": "active", "description": "网格对端经多跳建立会话" },
+    { "kind": "events_rx", "op": ">=", "value": 10, "description": "数据经两级中继到达" },
+    { "kind": "unicast_hops", "op": ">=", "value": 20, "description": "单播按三跳累计" },
+    { "kind": "medium_count", "op": ">=", "value": 10, "description": "介质传播记录可见" },
+    { "kind": "drops", "op": "<=", "value": 0, "description": "有中继路径时不丢包" }
+  ]
+}
