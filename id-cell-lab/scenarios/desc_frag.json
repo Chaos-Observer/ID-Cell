@@ -1,0 +1,47 @@
+{
+  "name": "描述符分片：超过单帧容量时按片传输并整体校验（FR-008/SEC-026）",
+  "duration_ms": 3000,
+  "seed": 41,
+  "key": "idcell-lab-key",
+  "link": { "delay_ms": 1, "media": "ethernet", "topology": "p2p", "t_link_min_ms": 1 },
+  "devices": [
+    {
+      "name": "multi-io",
+      "did": "00000000-000000A1",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "通道01", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 2, "sub": 0, "label": "通道02", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 3, "sub": 0, "label": "通道03", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 4, "sub": 0, "label": "通道04", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 5, "sub": 0, "label": "通道05", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 6, "sub": 0, "label": "通道06", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 7, "sub": 0, "label": "通道07", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 8, "sub": 0, "label": "通道08", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 9, "sub": 0, "label": "通道09", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 10, "sub": 0, "label": "通道10", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 11, "sub": 0, "label": "通道11", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 },
+        { "index": 12, "sub": 0, "label": "通道12", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 1, "t_prod_ms": 50, "stale_ms": 2000 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 30.0, "amplitude": 5.0, "period_ms": 2000 },
+        { "index": 12, "sub": 0, "base": 60.0, "amplitude": 5.0, "period_ms": 2000 }
+      ]
+    },
+    {
+      "name": "hmi-desc",
+      "did": "00000000-000000A2",
+      "reqs": [
+        { "qty": "ratio", "unit": "%", "kind": 1, "want_ms": 100, "stale_ms": 2000 }
+      ]
+    }
+  ],
+  "faults": [],
+  "asserts": [
+    { "kind": "desc_frag_tx", "op": ">=", "value": 2, "description": "公共描述超过单帧容量，按片下发" },
+    { "kind": "desc_frag_rx", "op": ">=", "value": 2, "description": "消费方按片接收" },
+    { "kind": "desc_reassemble_ok", "op": ">=", "value": 1, "description": "分片重组后整体 CRC 校验通过" },
+    { "kind": "desc_crc_errors", "op": "==", "value": 0, "description": "无完整性问题" },
+    { "kind": "binds_ok", "op": ">=", "value": 1, "description": "取全描述后正常进入绑定" },
+    { "kind": "stage", "device": "hmi-desc", "peer": "multi-io", "stage": "active", "description": "分片视图不影响握手完成" }
+  ]
+}

@@ -188,6 +188,25 @@ pub struct DescCache {
     pub caps: Vec<Capability>,
 }
 
+/// 描述符分片重组缓冲（FR-008/SEC-026）。
+#[derive(Debug, Clone)]
+pub struct FragBuffer {
+    pub desc_version: u32,
+    pub desc_crc: u32,
+    pub total: usize,
+    pub chunks: Vec<Option<Vec<u8>>>,
+    pub deadline_ms: u64,
+}
+
+/// 单个分片载荷上限：留足 TLV/帧头余量，确保不超过 MAX_FRAME。
+pub const DESC_FRAG_BYTES: usize = 512;
+/// SEC-044：描述符整体上限 8 KB。
+pub const DESC_MAX_BYTES: usize = 8192;
+/// SEC-044：能力点条目上限 256。
+pub const DESC_MAX_CAPS: usize = 256;
+/// 分片重组等待上限；超时丢弃未取全的视图，禁止进入 MATCH。
+pub const DESC_FRAG_TIMEOUT_MS: u64 = 1500;
+
 /// 公共描述视图的版本与完整性摘要：双方 MUST 由同一字节序列算出。
 fn descriptor_digest(caps: &[Capability]) -> (u32, u32) {
     let mut buf = Vec::new();
@@ -323,6 +342,16 @@ pub struct DeviceCounters {
     pub done_errors: u64,
     /// CMD 被拒次数（不可执行/无有效租约/缺意图）
     pub cmd_rejects: u64,
+    /// 已发出的描述符分片（提供方）
+    pub desc_frag_tx: u64,
+    /// 已收到的描述符分片（消费方）
+    pub desc_frag_rx: u64,
+    /// 描述符分片重组并通过整体校验的次数
+    pub desc_reassemble_ok: u64,
+    /// 描述符整体校验失败/分片非法（SEC-026）
+    pub desc_crc_errors: u64,
+    /// 描述符超出 8KB/256 点上限被明确拒绝（SEC-044）
+    pub desc_oversize: u64,
 }
 
 /// 单条查询应答（发起方聚合用）。
@@ -492,6 +521,8 @@ pub struct Device {
     pub bindings: BTreeMap<(Did, u16, u8), BindingCache>,
     /// 消费者缓存的公共描述视图，重连时跳过重复拉取（FR-028）。
     pub desc_cache: BTreeMap<Did, DescCache>,
+    /// 描述符分片重组缓冲（FR-008）。
+    pub desc_frag: BTreeMap<Did, FragBuffer>,
     /// 授权纪元计数器：每次绑定都递增，旧纪元不得恢复。
     pub grant_epoch: u64,
     /// 当前可靠组播轮次（None 表示没有等待成员的组声明）。
@@ -564,6 +595,7 @@ impl Device {
             desc_crc,
             bindings: BTreeMap::new(),
             desc_cache: BTreeMap::new(),
+            desc_frag: BTreeMap::new(),
             grant_epoch: 1,
             group_pending: None,
             group_epoch: 1,
@@ -1267,6 +1299,7 @@ impl Device {
         self.check_leases(now, &mut out);
         self.check_consumer_stale(now, &mut out);
         self.check_queries(now, &mut out);
+        self.check_desc_frag(now, &mut out);
         self.check_groups(now, &mut out);
         self.check_commands(now, &mut out);
         self.publish_due(now, &mut out);
@@ -1356,6 +1389,9 @@ impl Device {
             push(g.deadline_ms);
         }
         if let Some(t) = self.pending_cmds.iter().map(|c| c.due_ms).min() {
+            push(t);
+        }
+        if let Some(t) = self.desc_frag.values().map(|b| b.deadline_ms).min() {
             push(t);
         }
         best
@@ -1862,8 +1898,64 @@ impl Device {
             // 公共视图未变：不重复发送 CAP_DESC，消费者直接复用缓存。
             w.field_u8(tlv_type::RESUMED, 1);
         } else {
+            // FR-008：公共视图超过单帧容量时必须分片，并携带片号/总片数与整体校验；
+            // SEC-044：超过 8 KB / 256 点上限时必须明确报错，不得截断后继续。
+            let mut stream = TlvWriter::new();
             for cap in &self.caps {
-                let _ = w.raw_put(cap.index, cap.sub, tlv_type::CAP_DESC, &cap.encode_public());
+                let _ = stream.raw_put(cap.index, cap.sub, tlv_type::CAP_DESC, &cap.encode_public());
+            }
+            let desc_bytes = stream.finish();
+            if desc_bytes.len() > DESC_MAX_BYTES || self.caps.len() > DESC_MAX_CAPS {
+                self.counters.desc_oversize += 1;
+                out.push(self.trace(
+                    "desc_oversize",
+                    f.src,
+                    format!(
+                        "公共描述 {} B / {} 点，超过 8 KB / 256 点上限，拒绝提供不完整视图",
+                        desc_bytes.len(),
+                        self.caps.len()
+                    ),
+                ));
+                self.send_error(
+                    now,
+                    f.src,
+                    ErrCode::NoDev,
+                    "描述符超过上限，拒绝提供不完整视图",
+                    out,
+                );
+                return;
+            }
+            if desc_bytes.len() <= DESC_FRAG_BYTES {
+                // 单帧可容纳：沿用逐能力点 TLV 视图。
+                for cap in &self.caps {
+                    let _ = w.raw_put(cap.index, cap.sub, tlv_type::CAP_DESC, &cap.encode_public());
+                }
+            } else {
+                let chunks: Vec<&[u8]> = desc_bytes.chunks(DESC_FRAG_BYTES).collect();
+                let total = chunks.len();
+                for (i, chunk) in chunks.iter().enumerate() {
+                    let mut fw = TlvWriter::new();
+                    fw.field_u8(tlv_type::ROLE, ROLE_CAPABILITY);
+                    fw.field_u32(tlv_type::DESC_VER, self.desc_version);
+                    fw.field_u32(tlv_type::DESC_CRC, self.desc_crc);
+                    fw.field_str(tlv_type::SUMMARY, &self.name);
+                    fw.field_u8(tlv_type::DESC_FRAG_IDX, i as u8);
+                    fw.field_u8(tlv_type::DESC_FRAG_TOTAL, total as u8);
+                    let _ = fw.raw_put(0, 0, tlv_type::CAP_DESC, chunk);
+                    out.push(self.frame(now, ftype::HELLO, f.src, txn, fw.finish()));
+                }
+                self.counters.desc_frag_tx += total as u64;
+                out.push(self.trace(
+                    "hello_frag",
+                    f.src,
+                    format!(
+                        "公共描述 {} B 超过单帧容量，按 {} 片下发（整体 CRC 0x{:08X}）",
+                        desc_bytes.len(),
+                        total,
+                        self.desc_crc
+                    ),
+                ));
+                return;
             }
         }
         out.push(self.frame(now, ftype::HELLO, f.src, txn, w.finish()));
@@ -1876,6 +1968,150 @@ impl Device {
                 format!("回应 DISCOVER，公布 {} 个能力点", self.caps.len())
             },
         ));
+    }
+
+    /// 收集描述符分片并按整体摘要校验（FR-008/SEC-026）。
+    /// 返回 `None` 表示尚未取全或校验失败——两种情况下都禁止进入 MATCH。
+    #[allow(clippy::too_many_arguments)]
+    fn accept_desc_fragment(
+        &mut self,
+        tlvs: &[idcell_core::Tlv],
+        peer: Did,
+        total: usize,
+        desc_ver: u32,
+        desc_crc: u32,
+        now: u64,
+        out: &mut Vec<Action>,
+    ) -> Option<Vec<Capability>> {
+        let idx = get_u8(tlvs, tlv_type::DESC_FRAG_IDX).unwrap_or(0) as usize;
+        let Some(chunk) = tlvs.iter().find(|t| t.typ == tlv_type::CAP_DESC) else {
+            self.counters.desc_crc_errors += 1;
+            out.push(self.trace("desc_frag_invalid", peer, "分片缺少 CAP_DESC 载荷".to_string()));
+            return None;
+        };
+        // SEC-044：分片数与总字节都必须有上限，避免分片风暴或无限缓冲。
+        if total == 0 || total > DESC_MAX_CAPS || idx >= total {
+            self.counters.desc_crc_errors += 1;
+            out.push(self.trace(
+                "desc_frag_invalid",
+                peer,
+                format!("分片序号非法：{idx}/{total}"),
+            ));
+            return None;
+        }
+        if total.saturating_mul(DESC_FRAG_BYTES) > DESC_MAX_BYTES + DESC_FRAG_BYTES {
+            self.counters.desc_oversize += 1;
+            out.push(self.trace(
+                "desc_oversize",
+                peer,
+                format!("分片总量超过 8 KB 上限（{total} 片），拒绝重组"),
+            ));
+            return None;
+        }
+        let need_new = match self.desc_frag.get(&peer) {
+            Some(b) => b.desc_version != desc_ver || b.desc_crc != desc_crc || b.total != total,
+            None => true,
+        };
+        if need_new {
+            self.desc_frag.insert(
+                peer,
+                FragBuffer {
+                    desc_version: desc_ver,
+                    desc_crc,
+                    total,
+                    chunks: vec![None; total],
+                    deadline_ms: now + DESC_FRAG_TIMEOUT_MS,
+                },
+            );
+        }
+        let (complete, got) = {
+            let Some(buf) = self.desc_frag.get_mut(&peer) else {
+                return None;
+            };
+            buf.deadline_ms = now + DESC_FRAG_TIMEOUT_MS;
+            buf.chunks[idx] = Some(chunk.value.clone());
+            let got = buf.chunks.iter().filter(|c| c.is_some()).count();
+            (got == total, got)
+        };
+        self.counters.desc_frag_rx += 1;
+        if !complete {
+            out.push(self.trace(
+                "desc_frag_wait",
+                peer,
+                format!("描述符分片 {got}/{total}，等待剩余分片"),
+            ));
+            return None;
+        }
+        let Some(buf) = self.desc_frag.remove(&peer) else {
+            return None;
+        };
+        let mut stream = Vec::new();
+        for c in &buf.chunks {
+            if let Some(v) = c {
+                stream.extend_from_slice(v);
+            }
+        }
+        let Ok(items) = decode_tlvs(&stream) else {
+            self.counters.desc_crc_errors += 1;
+            out.push(self.trace("desc_crc_error", peer, "分片重组后 TLV 流不可解析".to_string()));
+            return None;
+        };
+        let caps: Vec<Capability> = items
+            .iter()
+            .filter(|t| t.typ == tlv_type::CAP_DESC)
+            .filter_map(|t| {
+                Capability::decode(&t.value).ok().map(|mut c| {
+                    c.index = t.idx;
+                    c.sub = t.sub;
+                    c
+                })
+            })
+            .collect();
+        let (ver, crc) = descriptor_digest(&caps);
+        if ver != buf.desc_version || crc != buf.desc_crc {
+            // SEC-026：整体校验失败必须丢弃全部分片，且不得缓存、不得 MATCH。
+            self.counters.desc_crc_errors += 1;
+            out.push(self.trace(
+                "desc_crc_error",
+                peer,
+                format!(
+                    "描述符整体校验失败：算出 0x{crc:08X}，声明 0x{:08X}，已丢弃 {} 片",
+                    buf.desc_crc, buf.total
+                ),
+            ));
+            return None;
+        }
+        self.counters.desc_reassemble_ok += 1;
+        out.push(self.trace(
+            "desc_reassembled",
+            peer,
+            format!("描述符 {} 片已重组，{} B / {} 点，整体 CRC 通过", buf.total, stream.len(), caps.len()),
+        ));
+        Some(caps)
+    }
+
+    /// 分片等待超时：丢弃未取全的视图并计数（禁止 MATCH）。
+    fn check_desc_frag(&mut self, now: u64, out: &mut Vec<Action>) {
+        if self.desc_frag.is_empty() {
+            return;
+        }
+        let expired: Vec<Did> = self
+            .desc_frag
+            .iter()
+            .filter(|(_, b)| now >= b.deadline_ms)
+            .map(|(d, _)| *d)
+            .collect();
+        for d in expired {
+            if let Some(b) = self.desc_frag.remove(&d) {
+                let got = b.chunks.iter().filter(|c| c.is_some()).count();
+                self.counters.desc_crc_errors += 1;
+                out.push(self.trace(
+                    "desc_frag_timeout",
+                    d,
+                    format!("描述符仅收到 {got}/{} 片，超时丢弃，禁止 MATCH", b.total),
+                ));
+            }
+        }
     }
 
     fn on_hello(&mut self, now: u64, f: &Frame, out: &mut Vec<Action>) {
@@ -1913,18 +2149,25 @@ impl Device {
             }
             cache.caps
         } else {
-            let caps: Vec<Capability> = tlvs
-                .iter()
-                .filter(|t| t.typ == tlv_type::CAP_DESC)
-                .filter_map(|t| {
-                    Capability::decode(&t.value).ok().map(|mut c| {
-                        // 点标识在 TLV 头里，不在描述符体内——必须回填，否则所有点都退化成默认索引。
-                        c.index = t.idx;
-                        c.sub = t.sub;
-                        c
+            let caps: Vec<Capability> = if let Some(total) = get_u8(&tlvs, tlv_type::DESC_FRAG_TOTAL) {
+                // FR-008：分片视图。未取全或整体校验失败时禁止进入 MATCH。
+                match self.accept_desc_fragment(&tlvs, f.src, total as usize, desc_ver, desc_crc, now, out) {
+                    Some(caps) => caps,
+                    None => return,
+                }
+            } else {
+                tlvs.iter()
+                    .filter(|t| t.typ == tlv_type::CAP_DESC)
+                    .filter_map(|t| {
+                        Capability::decode(&t.value).ok().map(|mut c| {
+                            // 点标识在 TLV 头里，不在描述符体内——必须回填，否则所有点都退化成默认索引。
+                            c.index = t.idx;
+                            c.sub = t.sub;
+                            c
+                        })
                     })
-                })
-                .collect();
+                    .collect()
+            };
             if caps.is_empty() {
                 return;
             }

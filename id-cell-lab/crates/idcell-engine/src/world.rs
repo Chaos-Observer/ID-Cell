@@ -1309,6 +1309,26 @@ impl World {
         self.devices.iter().map(|d| d.counters.done_sent).sum()
     }
 
+    pub fn total_desc_frag_tx(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.desc_frag_tx).sum()
+    }
+
+    pub fn total_desc_frag_rx(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.desc_frag_rx).sum()
+    }
+
+    pub fn total_desc_reassemble_ok(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.desc_reassemble_ok).sum()
+    }
+
+    pub fn total_desc_crc_errors(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.desc_crc_errors).sum()
+    }
+
+    pub fn total_desc_oversize(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.desc_oversize).sum()
+    }
+
     /// 某设备对 peer 的会话是否走了描述缓存复用路径（FR-028）。
     pub fn session_resumed(&self, device: &str, peer: &str) -> bool {
         let Some(d) = self.device(device) else {
@@ -1796,7 +1816,7 @@ impl Snapshot {
             }
             s.push_str("],\"counters\":{");
             s.push_str(&format!(
-                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"logic_fired\":{}",
+                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{}",
                 d.counters.tx,
                 d.counters.rx,
                 d.counters.binds_ok,
@@ -1829,6 +1849,11 @@ impl Snapshot {
                 d.counters.done_rx,
                 d.counters.done_errors,
                 d.counters.cmd_rejects,
+                d.counters.desc_frag_tx,
+                d.counters.desc_frag_rx,
+                d.counters.desc_reassemble_ok,
+                d.counters.desc_crc_errors,
+                d.counters.desc_oversize,
                 d.counters.logic_fired
             ));
             s.push_str("},\"queries\":[");
