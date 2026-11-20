@@ -437,6 +437,9 @@ pub struct FaultDef {
     pub response_timeout_ms: u32,
     pub group_epoch: u32,
     pub response_mode: u8,
+    /// cmd 故障：仿真执行耗时与是否失败（失败必须在 DONE 中给出原因）
+    pub exec_ms: u32,
+    pub fail: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -802,6 +805,12 @@ fn parse_fault(v: &Json) -> Result<FaultDef, String> {
                 .unwrap_or(idcell_core::consts::response_mode::REQUIRED as u64)
                 as u8,
         },
+        exec_ms: v.u64_field("exec_ms").unwrap_or(200) as u32,
+        fail: v
+            .u64_field("fail")
+            .map(|x| x != 0)
+            .or_else(|| v.str_field("fail").map(|s| s == "true"))
+            .unwrap_or(false),
     })
 }
 

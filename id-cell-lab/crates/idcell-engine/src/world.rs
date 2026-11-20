@@ -1166,6 +1166,35 @@ impl World {
         true
     }
 
+    /// 下发命令（FR-039：CMD → ACK → DONE）。
+    #[allow(clippy::too_many_arguments)]
+    pub fn request_command(
+        &mut self,
+        device: &str,
+        peer: &str,
+        index: u16,
+        sub: u8,
+        exec_ms: u32,
+        fail: bool,
+        intent: &str,
+    ) -> bool {
+        let (Some(ci), Some(pi)) = (self.resolve(device), self.resolve(peer)) else {
+            return false;
+        };
+        let peer_did = self.devices[pi].did;
+        let actions = self.devices[ci].request_command(
+            self.now_ms,
+            peer_did,
+            index,
+            sub,
+            exec_ms,
+            fail,
+            intent,
+        );
+        self.apply_actions(ci, actions);
+        true
+    }
+
     /// 发起查询（Zenoh 风格）：默认广播，`peer` 非空时定向到单个提供者。
     pub fn request_query(
         &mut self,
@@ -1254,6 +1283,30 @@ impl World {
 
     pub fn total_reneg_ok(&self) -> u64 {
         self.devices.iter().map(|d| d.counters.reneg_ok).sum()
+    }
+
+    pub fn total_cmds_sent(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.cmds_sent).sum()
+    }
+
+    pub fn total_cmd_acks(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.cmd_acks).sum()
+    }
+
+    pub fn total_done_rx(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.done_rx).sum()
+    }
+
+    pub fn total_done_errors(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.done_errors).sum()
+    }
+
+    pub fn total_commands_rx(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.commands_rx).sum()
+    }
+
+    pub fn total_done_sent(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.done_sent).sum()
     }
 
     /// 某设备对 peer 的会话是否走了描述缓存复用路径（FR-028）。
@@ -1743,7 +1796,7 @@ impl Snapshot {
             }
             s.push_str("],\"counters\":{");
             s.push_str(&format!(
-                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"logic_fired\":{}",
+                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"logic_fired\":{}",
                 d.counters.tx,
                 d.counters.rx,
                 d.counters.binds_ok,
@@ -1769,6 +1822,13 @@ impl Snapshot {
                 d.counters.config_rejects,
                 d.counters.reneg_sent,
                 d.counters.reneg_ok,
+                d.counters.cmds_sent,
+                d.counters.commands_rx,
+                d.counters.cmd_acks,
+                d.counters.done_sent,
+                d.counters.done_rx,
+                d.counters.done_errors,
+                d.counters.cmd_rejects,
                 d.counters.logic_fired
             ));
             s.push_str("},\"queries\":[");

@@ -164,6 +164,10 @@ pub mod tlv_type {
     pub const LABEL: u8 = 0x5F;
     /// 实验室扩展：HELLO 命中公共描述缓存（1=复用缓存，未携带 CAP_DESC）。
     pub const RESUMED: u8 = 0x60;
+    /// 实验室扩展：命令预计执行时长（ms），用于仿真 CMD→ACK→DONE 三段语义。
+    pub const EXEC_MS: u8 = 0x61;
+    /// 实验室扩展：命令执行结果开关（1=执行失败），用于验证 DONE 必须携带失败原因。
+    pub const EXEC_FAIL: u8 = 0x62;
     /// 组播组号（u16/u32 大端）。
     pub const GROUP_ID: u8 = 0x7A;
     /// 组声明响应模式：0=不要求响应，1=要求响应（可靠组播）。

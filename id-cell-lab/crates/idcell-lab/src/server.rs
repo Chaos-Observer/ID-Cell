@@ -401,6 +401,8 @@ fn inject_fault(sim: &Arc<Mutex<Sim>>, body: &[u8]) -> Result<String, String> {
                 .unwrap_or(idcell_core::consts::response_mode::REQUIRED as u64)
                 as u8,
         },
+        exec_ms: json.u64_field("exec_ms").unwrap_or(200) as u32,
+        fail: json.u64_field("fail").map(|x| x != 0).unwrap_or(false),
     };
     let mut guard = sim.lock().map_err(|_| "状态锁损坏".to_string())?;
     apply_fault(&mut guard.world, &fault)?;

@@ -32,7 +32,7 @@ impl RunOutcome {
         }
         let m = &self.snapshot.metrics;
         s.push_str(&format!(
-            "],\"metrics\":{{\"frames_tx\":{},\"frames_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"binds_ok\":{},\"binds_fail\":{},\"resumes_ok\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_ok\":{},\"stale_events\":{},\"timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{}}}}}",
+            "],\"metrics\":{{\"frames_tx\":{},\"frames_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"binds_ok\":{},\"binds_fail\":{},\"resumes_ok\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"cmd_acks\":{},\"done_rx\":{},\"done_errors\":{},\"stale_events\":{},\"timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{}}}}}",
             m.frames_tx,
             m.frames_rx,
             m.drops,
@@ -49,6 +49,10 @@ impl RunOutcome {
             bind_sum(&self.snapshot, |c| c.config_ok),
             bind_sum(&self.snapshot, |c| c.config_rejects),
             bind_sum(&self.snapshot, |c| c.reneg_ok),
+            bind_sum(&self.snapshot, |c| c.cmds_sent),
+            bind_sum(&self.snapshot, |c| c.cmd_acks),
+            bind_sum(&self.snapshot, |c| c.done_rx),
+            bind_sum(&self.snapshot, |c| c.done_errors),
             bind_sum(&self.snapshot, |c| c.stale_events),
             bind_sum(&self.snapshot, |c| c.session_timeouts),
             bind_sum(&self.snapshot, |c| c.writes_ok),
@@ -120,6 +124,15 @@ pub fn apply_fault(world: &mut World, f: &FaultDef) -> Result<(), String> {
             f.index,
             f.sub,
             f.value as u8,
+            &f.intent,
+        ),
+        "cmd" => world.request_command(
+            &f.device,
+            &f.peer,
+            f.index,
+            f.sub,
+            f.exec_ms,
+            f.fail,
             &f.intent,
         ),
         "raw_frame" => {

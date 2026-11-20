@@ -1,0 +1,38 @@
+{
+  "name": "命令三段语义：CMD → ACK → DONE（FR-039）",
+  "duration_ms": 3200,
+  "seed": 37,
+  "key": "idcell-lab-key",
+  "link": { "delay_ms": 1, "media": "ethernet", "topology": "p2p", "t_link_min_ms": 1 },
+  "devices": [
+    {
+      "name": "act-01",
+      "did": "00000000-00000091",
+      "caps": [
+        { "index": 9, "sub": 0, "label": "电机启停", "qty": "ratio", "unit": "%", "dtype": "f64", "perm": 0, "dir": 3, "t_prod_ms": 50, "stale_ms": 2000 }
+      ],
+      "values": [ { "index": 9, "sub": 0, "base": 0.0, "amplitude": 0.0, "period_ms": 3000 } ]
+    },
+    {
+      "name": "hmi-cmd",
+      "did": "00000000-00000092",
+      "preempt": true,
+      "reqs": [
+        { "qty": "ratio", "unit": "%", "kind": 1, "want_ms": 100, "stale_ms": 2000 }
+      ]
+    }
+  ],
+  "faults": [
+    { "at_ms": 1500, "kind": "cmd", "device": "hmi-cmd", "peer": "act-01", "index": 9, "sub": 0, "exec_ms": 500, "intent": "启动电机" },
+    { "at_ms": 1700, "kind": "cmd", "device": "hmi-cmd", "peer": "act-01", "index": 9, "sub": 0, "exec_ms": 300, "fail": 1, "intent": "反转电机" }
+  ],
+  "asserts": [
+    { "kind": "cmds_sent", "op": ">=", "value": 2, "description": "两条命令均已下发" },
+    { "kind": "cmd_acks", "op": ">=", "value": 2, "description": "各命令在执行前先收到受理 ACK（与执行耗时解耦）" },
+    { "kind": "done_rx", "op": ">=", "value": 2, "description": "执行完成后均收到 DONE" },
+    { "kind": "done_errors", "op": ">=", "value": 1, "description": "失败命令在 DONE 中给出原因，不以缺失 DONE 代替" },
+    { "kind": "frame", "frame": "CMD", "op": ">=", "value": 2, "description": "CMD 真正上了链路" },
+    { "kind": "frame", "frame": "DONE", "op": ">=", "value": 2, "description": "DONE 真正上了链路" },
+    { "kind": "stage", "device": "hmi-cmd", "peer": "act-01", "stage": "active", "description": "命令流不影响既有会话" }
+  ]
+}

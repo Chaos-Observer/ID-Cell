@@ -309,6 +309,20 @@ pub struct DeviceCounters {
     pub reneg_sent: u64,
     /// 已接受并生效的 RENEGOTIATE（消费方侧，SEC-025 HMAC 校验通过）
     pub reneg_ok: u64,
+    /// 已下发的 CMD（消费方）
+    pub cmds_sent: u64,
+    /// 已受理的 CMD（提供方，已回 ACK）
+    pub commands_rx: u64,
+    /// 收到的命令受理 ACK（消费方，FR-039 第一段）
+    pub cmd_acks: u64,
+    /// 已发出的 DONE（提供方，FR-039 第三段）
+    pub done_sent: u64,
+    /// 收到的 DONE（消费方）
+    pub done_rx: u64,
+    /// DONE 报告执行失败的次数（FR-039：失败必须在 DONE 中给出原因）
+    pub done_errors: u64,
+    /// CMD 被拒次数（不可执行/无有效租约/缺意图）
+    pub cmd_rejects: u64,
 }
 
 /// 单条查询应答（发起方聚合用）。
@@ -350,6 +364,19 @@ pub struct GroupRound {
     pub responders: BTreeSet<Did>,
     pub deadline_ms: u64,
     pub epoch: u32,
+}
+
+/// 已受理但尚未完成的命令（FR-039：ACK 表示受理，DONE 表示执行完成）。
+#[derive(Debug, Clone)]
+pub struct PendingCmd {
+    pub peer: Did,
+    pub txn: u16,
+    pub command_id: u32,
+    pub index: u16,
+    pub sub: u8,
+    pub due_ms: u64,
+    pub fail: bool,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -471,6 +498,10 @@ pub struct Device {
     pub group_pending: Option<GroupRound>,
     /// 本机成员关系纪元；组声明中的 group_epoch 必须与之一致。
     pub group_epoch: u32,
+    /// 已受理、等待执行完成的命令（提供方侧）。
+    pub pending_cmds: Vec<PendingCmd>,
+    /// 命令编号计数器（COMMAND_ID）。
+    pub next_cmd_id: u32,
 }
 
 impl Device {
@@ -536,6 +567,8 @@ impl Device {
             grant_epoch: 1,
             group_pending: None,
             group_epoch: 1,
+            pending_cmds: Vec::new(),
+            next_cmd_id: 1,
         }
     }
 
@@ -714,6 +747,54 @@ impl Device {
             "config",
             peer,
             format!("申请配置 {index}/{sub} 权限等级 → P{}", new_perm.min(3)),
+        ));
+        out
+    }
+
+    /// 下发命令（FR-039 三段语义）：CMD 发出后先收 ACK（已受理），执行完成后由提供方回 DONE。
+    /// `exec_ms` 仅表示仿真的执行耗时；`fail` 为真时提供方在 DONE 中报告失败原因。
+    pub fn request_command(
+        &mut self,
+        now: u64,
+        peer: Did,
+        index: u16,
+        sub: u8,
+        exec_ms: u32,
+        fail: bool,
+        intent: &str,
+    ) -> Vec<Action> {
+        let mut out = Vec::new();
+        let Some(sess) = self.sessions.get(&peer) else {
+            out.push(self.trace("cmd_skip", peer, "会话不存在，无法下发命令"));
+            return out;
+        };
+        if sess.stage != Stage::Active {
+            out.push(self.trace("cmd_skip", peer, "会话未处于 active，无法下发命令"));
+            return out;
+        }
+        let token = sess
+            .contract
+            .as_ref()
+            .map(|c| c.owner_token)
+            .unwrap_or(0);
+        let cmd_id = self.next_cmd_id;
+        self.next_cmd_id = self.next_cmd_id.wrapping_add(1).max(1);
+        let txn = self.next_txn();
+        let mut w = TlvWriter::new();
+        w.put_u16(index, sub, tlv_type::INDEX, index);
+        w.field_u32(tlv_type::COMMAND_ID, cmd_id);
+        w.field_u32(tlv_type::OWNER, token);
+        w.field_u32(tlv_type::EXEC_MS, exec_ms.max(1));
+        if fail {
+            w.field_u8(tlv_type::EXEC_FAIL, 1);
+        }
+        w.field_str(tlv_type::INTENT, intent);
+        out.push(self.frame(now, ftype::CMD, peer, txn, w.finish()));
+        self.counters.cmds_sent += 1;
+        out.push(self.trace(
+            "cmd_sent",
+            peer,
+            format!("命令 {cmd_id} 已下发（预计 {exec_ms} ms 完成）"),
         ));
         out
     }
@@ -1024,6 +1105,135 @@ impl Device {
         ));
     }
 
+    /// 提供方受理 CMD：立即回 ACK（已受理），执行完成后再发 DONE（FR-039）。
+    fn on_cmd(&mut self, now: u64, f: &Frame, out: &mut Vec<Action>) {
+        if !matches!(self.mode, RunMode::Provider | RunMode::Both) {
+            return;
+        }
+        let Ok(tlvs) = decode_tlvs(&f.payload) else {
+            return;
+        };
+        let index = get_u16(&tlvs, tlv_type::INDEX).unwrap_or(0);
+        let sub = tlvs
+            .iter()
+            .find(|t| t.typ == tlv_type::INDEX)
+            .map(|t| t.sub)
+            .unwrap_or(0);
+        let token = get_u32(&tlvs, tlv_type::OWNER).unwrap_or(0);
+        let cmd_id = get_u32(&tlvs, tlv_type::COMMAND_ID).unwrap_or(0);
+        let exec_ms = get_u32(&tlvs, tlv_type::EXEC_MS).unwrap_or(200).max(1);
+        let fail = get_u8(&tlvs, tlv_type::EXEC_FAIL).unwrap_or(0) != 0;
+        let intent = get_str(&tlvs, tlv_type::INTENT).unwrap_or_default();
+        let Some(cap) = self.cap(index, sub).cloned() else {
+            self.counters.cmd_rejects += 1;
+            self.send_error(now, f.src, ErrCode::NoDev, "CMD 目标不存在", out);
+            return;
+        };
+        if !cap.writable() {
+            self.counters.cmd_rejects += 1;
+            self.send_error(now, f.src, ErrCode::Unsafe, "该能力点不可执行命令", out);
+            return;
+        }
+        let lease_ok = self
+            .owner
+            .as_ref()
+            .map(|o| o.peer == f.src && o.token == token && o.expires_ms > now)
+            .unwrap_or(false);
+        if !lease_ok {
+            self.counters.cmd_rejects += 1;
+            self.send_error(now, f.src, ErrCode::Lease, "CMD 缺少有效 owner_token", out);
+            return;
+        }
+        if intent.trim().is_empty() {
+            self.counters.cmd_rejects += 1;
+            self.send_error(now, f.src, ErrCode::Perm, "CMD 缺少意图结构", out);
+            return;
+        }
+        // 受理与执行分离：ACK 立即返回，不受执行耗时影响（NFR-006）。
+        let mut w = TlvWriter::new();
+        w.put_u8(index, sub, tlv_type::RESULT, ErrCode::Ok as u8);
+        w.put_u16(index, sub, tlv_type::INDEX, index);
+        w.field_u32(tlv_type::COMMAND_ID, cmd_id);
+        out.push(self.frame(now, ftype::ACK, f.src, f.txn, w.finish()));
+        self.counters.commands_rx += 1;
+        self.pending_cmds.push(PendingCmd {
+            peer: f.src,
+            txn: f.txn,
+            command_id: cmd_id,
+            index,
+            sub,
+            due_ms: now + exec_ms as u64,
+            fail,
+            reason: intent,
+        });
+        out.push(self.trace(
+            "cmd_accept",
+            f.src,
+            format!("命令 {cmd_id} 已受理，预计 {exec_ms} ms 后完成"),
+        ));
+    }
+
+    /// 消费方收到 DONE：执行完成（或失败并带原因）。
+    fn on_done(&mut self, now: u64, f: &Frame, out: &mut Vec<Action>) {
+        let Ok(tlvs) = decode_tlvs(&f.payload) else {
+            return;
+        };
+        let cmd_id = get_u32(&tlvs, tlv_type::COMMAND_ID).unwrap_or(0);
+        let code = result_code(&tlvs);
+        let reason = get_str(&tlvs, err_field::REASON).unwrap_or_default();
+        self.counters.done_rx += 1;
+        if code != ErrCode::Ok {
+            self.counters.done_errors += 1;
+        }
+        if let Some(s) = self.sessions.get_mut(&f.src) {
+            s.last_rx_ms = now;
+        }
+        out.push(self.trace(
+            "cmd_done",
+            f.src,
+            format!("命令 {cmd_id} 完成：{} {}", code.name(), reason),
+        ));
+    }
+
+    /// 执行到期的命令并发出 DONE（FR-039：失败必须带原因，绝不以缺失 DONE 代替）。
+    fn check_commands(&mut self, now: u64, out: &mut Vec<Action>) {
+        if self.pending_cmds.is_empty() {
+            return;
+        }
+        let mut remain = Vec::new();
+        let mut ready = Vec::new();
+        for c in std::mem::take(&mut self.pending_cmds) {
+            if now >= c.due_ms {
+                ready.push(c);
+            } else {
+                remain.push(c);
+            }
+        }
+        self.pending_cmds = remain;
+        for c in ready {
+            let code = if c.fail { ErrCode::Unsafe } else { ErrCode::Ok };
+            let mut w = TlvWriter::new();
+            w.put_u8(c.index, c.sub, tlv_type::RESULT, code as u8);
+            w.put_u16(c.index, c.sub, tlv_type::INDEX, c.index);
+            w.field_u32(tlv_type::COMMAND_ID, c.command_id);
+            if c.fail {
+                w.field_u8(err_field::CODE, code as u8);
+                w.field_str(err_field::REASON, &format!("执行失败：{}", c.reason));
+            }
+            out.push(self.frame(now, ftype::DONE, c.peer, c.txn, w.finish()));
+            self.counters.done_sent += 1;
+            out.push(self.trace(
+                "cmd_result",
+                c.peer,
+                format!(
+                    "命令 {} 执行{}",
+                    c.command_id,
+                    if c.fail { "失败（已回 DONE 带原因）" } else { "完成" }
+                ),
+            ));
+        }
+    }
+
     pub fn active_sessions(&self) -> impl Iterator<Item = &Session> {
         self.sessions.values().filter(|s| s.stage == Stage::Active)
     }
@@ -1058,6 +1268,7 @@ impl Device {
         self.check_consumer_stale(now, &mut out);
         self.check_queries(now, &mut out);
         self.check_groups(now, &mut out);
+        self.check_commands(now, &mut out);
         self.publish_due(now, &mut out);
         out
     }
@@ -1143,6 +1354,9 @@ impl Device {
         }
         if let Some(g) = self.group_pending.as_ref() {
             push(g.deadline_ms);
+        }
+        if let Some(t) = self.pending_cmds.iter().map(|c| c.due_ms).min() {
+            push(t);
         }
         best
     }
@@ -1552,6 +1766,8 @@ impl Device {
             ftype::EVENT => self.on_event(now, &f, &mut out),
             ftype::GROUP => self.on_group(now, &f, &mut out),
             ftype::CONFIG => self.on_config(now, &f, &mut out),
+            ftype::CMD => self.on_cmd(now, &f, &mut out),
+            ftype::DONE => self.on_done(now, &f, &mut out),
             ftype::RENEGOTIATE => {
                 // 带 AUTH 标志的是 CONFIG 生效后由提供方发起的受保护重协商（SEC-025）；
                 // 其余是消费方发起的 T_pub 重协商，沿用原协商处理路径。
@@ -1572,7 +1788,7 @@ impl Device {
             ftype::OFFLINE => self.on_offline(now, &f, &mut out),
             ftype::ERROR => self.on_error(now, &f, &mut out),
             _ => {
-                // 已知但暂未实现（PROVISION/CMD/DONE）或未知类型：
+                // 已知但暂未实现（PROVISION）或未知类型：
                 // 返回结构化错误，避免被静默忽略。
                 self.counters.proto_rejects += 1;
                 self.send_error(
@@ -2998,6 +3214,18 @@ impl Device {
             return;
         };
         let code = result_code(&tlvs);
+        // 携带 COMMAND_ID 的 ACK 是命令受理确认（FR-039 第二段），与 WRITE/READ 的 ACK 区分。
+        if let Some(t) = tlvs.iter().find(|t| t.typ == tlv_type::COMMAND_ID) {
+            self.counters.cmd_acks += 1;
+            if let Some(s) = self.sessions.get_mut(&f.src) {
+                s.last_rx_ms = now;
+            }
+            out.push(self.trace(
+                "cmd_ack",
+                f.src,
+                format!("命令 {} 已受理", t.as_u32().unwrap_or(0)),
+            ));
+        }
         let Some(sess) = self.sessions.get(&f.src).cloned() else {
             return;
         };
