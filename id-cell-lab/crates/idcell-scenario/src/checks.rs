@@ -90,6 +90,8 @@ fn counter(world: &World, kind: &str) -> Option<u64> {
         "bus_deferrals" => world.metrics.bus_deferrals,
         "bus_poll_drops" => world.metrics.bus_poll_drops,
         "bus_busy_ms" => world.metrics.bus_busy_ms,
+        "actuator_moves" => world.total_actuator_moves(),
+        "state_changes" => world.total_state_changes(),
         "link_ack_tx" => world.total_link_ack_tx(),
         "dup_drops" => world.total_dup_drops(),
         "provision_sent" => world.total_provision_sent(),

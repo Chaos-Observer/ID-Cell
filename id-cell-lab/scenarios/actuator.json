@@ -1,0 +1,72 @@
+{
+  "name": "执行器行程与设备状态机：风阀缓慢开启",
+  "duration_ms": 12000,
+  "seed": 44,
+  "key": "idcell-lab-key",
+  "require_link": true,
+  "link": {
+    "delay_ms": 2,
+    "jitter_ms": 0,
+    "media": "loopback",
+    "topology": "p2p",
+    "t_link_min_ms": 2
+  },
+  "devices": [
+    {
+      "name": "temp-01",
+      "did": "00000000-00000111",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "车间温度", "qty": "temperature", "unit": "C", "dtype": "f64", "scale": 2, "t_prod_ms": 250, "stale_ms": 3000 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 30.0, "amplitude": 2.0, "period_ms": 6000, "noise": 0.05 }
+      ]
+    },
+    {
+      "name": "ctrl-01",
+      "did": "00000000-00000112",
+      "reqs": [
+        { "qty": "temperature", "unit": "C", "want_ms": 250, "stale_ms": 3000 },
+        { "qty": "ratio", "unit": "%", "range": [0, 100], "want_ms": 250, "stale_ms": 5000 }
+      ],
+      "logic": [
+        {
+          "name": "valve-open",
+          "kind": "threshold",
+          "input": "1.0",
+          "op": ">",
+          "threshold": 26,
+          "on": 100,
+          "off": 0,
+          "target": "valve-01",
+          "output": "2.0",
+          "min_interval_ms": 500
+        }
+      ]
+    },
+    {
+      "name": "valve-01",
+      "did": "00000000-00000113",
+      "boot_ms": 800,
+      "caps": [
+        { "index": 2, "sub": 0, "label": "风阀开度", "qty": "ratio", "unit": "%", "dtype": "f64", "dir": 3, "range": [0, 100], "t_prod_ms": 250, "stale_ms": 3000 }
+      ],
+      "values": [
+        { "index": 2, "sub": 0, "base": 0.0, "amplitude": 0.0, "period_ms": 1000, "noise": 0.0 }
+      ],
+      "actuators": [
+        { "point": "2.0", "travel_ms": 3000, "min_on_ms": 1000, "initial": 0.0 }
+      ]
+    }
+  ],
+  "links": [
+    { "a": "temp-01", "b": "ctrl-01" },
+    { "a": "valve-01", "b": "ctrl-01" }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "ctrl-01", "peer": "valve-01", "stage": "active", "description": "控制器与风阀进入 Active" },
+    { "kind": "actuator_moves", "op": ">=", "value": 1, "description": "执行器收到目标并开始动作" },
+    { "kind": "value", "device": "ctrl-01", "index": 2, "sub": 0, "op": ">=", "value": 99, "tolerance": 0.0, "description": "风阀按行程缓慢开启到位（而非瞬时跳变）" },
+    { "kind": "state_changes", "op": ">=", "value": 1, "description": "设备状态机发生迁移" }
+  ]
+}

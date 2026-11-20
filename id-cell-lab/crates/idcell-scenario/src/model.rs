@@ -293,6 +293,18 @@ fn parse_logic(v: &Json) -> LogicDef {
     }
 }
 
+/// 执行器物理模型：写入后按行程时间或速率到位。
+#[derive(Debug, Clone)]
+pub struct ActDef {
+    pub index: u16,
+    pub sub: u8,
+    pub travel_ms: u32,
+    pub rate: f64,
+    pub min_on_ms: u64,
+    pub min_off_ms: u64,
+    pub initial: Option<f64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceDef {
     pub name: String,
@@ -300,6 +312,8 @@ pub struct DeviceDef {
     pub key: Option<String>,
     pub group: u16,
     pub start_ms: u64,
+    /// 启动自检时长（ms）。
+    pub boot_ms: u32,
     pub link_min_ms: u32,
     pub mode: RunMode,
     pub preempt: bool,
@@ -313,6 +327,7 @@ pub struct DeviceDef {
     pub reqs: Vec<ReqDef>,
     pub sims: Vec<SimDef>,
     pub logic: Vec<LogicDef>,
+    pub actuators: Vec<ActDef>,
 }
 
 impl DeviceDef {
@@ -321,6 +336,7 @@ impl DeviceDef {
         let mut spec = DeviceSpec::new(&self.name, did);
         spec.group = self.group;
         spec.start_ms = self.start_ms;
+        spec.boot_ms = self.boot_ms;
         spec.link_min_ms = self.link_min_ms;
         spec.preempt = self.preempt;
         spec.relay = self.relay;
@@ -358,6 +374,18 @@ impl DeviceDef {
         spec.sims = sims;
         for l in &self.logic {
             spec.rules.push(l.to_rule());
+        }
+        for a in &self.actuators {
+            spec.actuators.insert(
+                (a.index, a.sub),
+                idcell_engine::Actuator {
+                    travel_ms: a.travel_ms,
+                    rate: a.rate,
+                    min_on_ms: a.min_on_ms,
+                    min_off_ms: a.min_off_ms,
+                    initial: a.initial,
+                },
+            );
         }
         spec
     }
@@ -632,12 +660,31 @@ fn parse_device(v: &Json, index: usize) -> Result<DeviceDef, String> {
             logic.push(parse_logic(l));
         }
     }
+    let mut actuators = Vec::new();
+    if let Some(items) = v.array_field("actuators") {
+        for a in items {
+            let point = a
+                .str_field("point")
+                .and_then(|p| parse_point(&p))
+                .unwrap_or((1, 0));
+            actuators.push(ActDef {
+                index: a.u64_field("index").unwrap_or(point.0 as u64) as u16,
+                sub: a.u64_field("sub").unwrap_or(point.1 as u64) as u8,
+                travel_ms: a.u64_field("travel_ms").unwrap_or(0) as u32,
+                rate: a.f64_field("rate").unwrap_or(0.0),
+                min_on_ms: a.u64_field("min_on_ms").unwrap_or(0),
+                min_off_ms: a.u64_field("min_off_ms").unwrap_or(0),
+                initial: a.f64_field("initial"),
+            });
+        }
+    }
     Ok(DeviceDef {
         name,
         did: v.str_field("did").unwrap_or_else(|| format!("{:016X}", index as u64 + 1)),
         key: v.str_field("key"),
         group: v.u64_field("group").unwrap_or(0) as u16,
         start_ms: v.u64_field("start_ms").unwrap_or(0),
+        boot_ms: v.u64_field("boot_ms").unwrap_or(0) as u32,
         link_min_ms: v.u64_field("link_min_ms").unwrap_or(1) as u32,
         mode,
         preempt: v.bool_field("preempt").unwrap_or(false),
@@ -651,6 +698,7 @@ fn parse_device(v: &Json, index: usize) -> Result<DeviceDef, String> {
         reqs,
         sims,
         logic,
+        actuators,
     })
 }
 

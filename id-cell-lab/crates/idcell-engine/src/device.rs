@@ -358,6 +358,10 @@ pub struct DeviceCounters {
     pub dup_drops: u64,
     /// 已发起的入网/配网请求（消费方）
     pub provision_sent: u64,
+    /// 执行器动作次数（含中途改目标）
+    pub actuator_moves: u64,
+    /// 设备状态机迁移次数
+    pub state_changes: u64,
     /// 入网完成次数（提供方受理 / 消费方应用各计一次）
     pub provision_ok: u64,
     /// 入网被拒（会话未 active、HMAC 失败、组号非法）
@@ -418,6 +422,66 @@ pub struct PendingCmd {
     pub reason: String,
 }
 
+/// 执行器物理模型：写入不是瞬时到位，而是按行程时间或变化速率逼近目标。
+#[derive(Debug, Clone)]
+pub struct Actuator {
+    /// 全行程时间（ms），rate=0 时使用。
+    pub travel_ms: u32,
+    /// 变化速率（单位/秒），>0 时优先于 travel_ms。
+    pub rate: f64,
+    /// 最小保持接通时间（ms），防止频繁启停；0 表示不限制。
+    pub min_on_ms: u64,
+    /// 最小保持断开时间（ms）。
+    pub min_off_ms: u64,
+    /// 上电初始位置；None 表示沿用点位初值。
+    pub initial: Option<f64>,
+}
+
+impl Default for Actuator {
+    fn default() -> Self {
+        Actuator {
+            travel_ms: 0,
+            rate: 0.0,
+            min_on_ms: 0,
+            min_off_ms: 0,
+            initial: None,
+        }
+    }
+}
+
+/// 设备运行状态机：启动自检 → 就绪 → 运行；链路/电源异常时降级或故障。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceState {
+    Boot,
+    Ready,
+    Run,
+    Degraded,
+    Fault,
+}
+
+impl DeviceState {
+    pub fn name(self) -> &'static str {
+        match self {
+            DeviceState::Boot => "boot",
+            DeviceState::Ready => "ready",
+            DeviceState::Run => "run",
+            DeviceState::Degraded => "degraded",
+            DeviceState::Fault => "fault",
+        }
+    }
+}
+
+/// 执行器的运行时进度。
+#[derive(Debug, Clone)]
+pub struct ActState {
+    pub target: f64,
+    pub from: f64,
+    pub start_ms: u64,
+    pub end_ms: u64,
+    /// 最近一次通断切换完成的时刻（用于最小保持时间）。
+    pub last_switch_ms: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceSpec {
     pub name: String,
@@ -427,6 +491,8 @@ pub struct DeviceSpec {
     pub key: Vec<u8>,
     pub group: u16,
     pub start_ms: u64,
+    /// 启动自检时长（ms）：在此期间设备不发现、不发布、不应答。
+    pub boot_ms: u32,
     pub sims: BTreeMap<(u16, u8), PointSim>,
     pub link_min_ms: u32,
     pub preempt: bool,
@@ -438,6 +504,8 @@ pub struct DeviceSpec {
     pub bus_master: bool,
     /// 应用层行为规则（计算 / 数据使用）。
     pub rules: Vec<LogicRule>,
+    /// 执行器物理模型：按能力点索引。
+    pub actuators: BTreeMap<(u16, u8), Actuator>,
 }
 
 impl DeviceSpec {
@@ -450,6 +518,7 @@ impl DeviceSpec {
             key: b"idcell-lab-key".to_vec(),
             group: 0,
             start_ms: 0,
+            boot_ms: 0,
             sims: BTreeMap::new(),
             link_min_ms: 1,
             preempt: false,
@@ -457,6 +526,7 @@ impl DeviceSpec {
             prof: 0,
             bus_master: false,
             rules: Vec::new(),
+            actuators: BTreeMap::new(),
         }
     }
 }
@@ -523,6 +593,13 @@ pub struct Device {
     pub prof: u8,
     /// 共享总线主站标记（World 的轮询仲裁使用）。
     pub bus_master: bool,
+    /// 运行状态机与自检时长。
+    pub state: DeviceState,
+    pub state_since: u64,
+    pub boot_ms: u32,
+    /// 执行器模型与当前运动状态。
+    pub actuators: BTreeMap<(u16, u8), Actuator>,
+    pub act_states: BTreeMap<(u16, u8), ActState>,
     /// 应用层行为规则与运行状态（规则触发节流 / 上次输出）。
     pub rules: Vec<LogicRule>,
     pub logic_state: Vec<LogicState>,
@@ -575,6 +652,14 @@ impl Device {
                 },
             );
         }
+        // 执行器声明的初始位置覆盖点位初值（如阀门上电停在全关/全开）。
+        for (key, act) in &spec.actuators {
+            if let Some(v) = act.initial {
+                if let Some(p) = points.get_mut(key) {
+                    p.value = v;
+                }
+            }
+        }
         Device {
             id,
             name: spec.name,
@@ -608,6 +693,11 @@ impl Device {
             relay: spec.relay,
             prof: spec.prof,
             bus_master: spec.bus_master,
+            state: DeviceState::Ready,
+            state_since: 0,
+            boot_ms: spec.boot_ms,
+            actuators: spec.actuators,
+            act_states: BTreeMap::new(),
             logic_state: vec![LogicState::default(); spec.rules.len()],
             rules: spec.rules,
             queries: BTreeMap::new(),
@@ -1426,7 +1516,15 @@ impl Device {
         if !self.powered {
             return out;
         }
+        // 启动自检期间不发现、不发布、不应答（仍保留点位初值）。
+        if now < self.start_ms.saturating_add(self.boot_ms as u64) {
+            self.state = DeviceState::Boot;
+            self.state_since = now;
+            return out;
+        }
+        self.update_actuators(now);
         self.update_simulated_points(now);
+        self.update_state(now);
         if self.awake && self.rx_on {
             self.maybe_discover(now, &mut out);
         }
@@ -1460,8 +1558,9 @@ impl Device {
             // 断电/休眠由外部事件驱动
             return None;
         }
-        if now < self.start_ms {
-            push(self.start_ms);
+        let boot_at = self.start_ms.saturating_add(self.boot_ms as u64);
+        if now < boot_at {
+            push(boot_at);
         }
 
         // 发现：没有存活消费者会话时按 1s 重发
@@ -1516,6 +1615,12 @@ impl Device {
         if let Some(o) = self.owner.as_ref() {
             push(o.expires_ms);
         }
+        for a in self.act_states.values() {
+            push(a.end_ms);
+            if a.start_ms > now {
+                push(a.start_ms);
+            }
+        }
         for q in self.queries.values() {
             if !q.done {
                 push(q.deadline_ms);
@@ -1531,6 +1636,64 @@ impl Device {
             push(t);
         }
         best
+    }
+
+    /// 推进执行器：按行程时间/速率从起点逼近目标，未到位前持续更新实际值。
+    fn update_actuators(&mut self, now: u64) {
+        let keys: Vec<(u16, u8)> = self.act_states.keys().copied().collect();
+        for key in keys {
+            let Some(st) = self.act_states.get(&key).cloned() else {
+                continue;
+            };
+            if now < st.start_ms {
+                continue;
+            }
+            let span = st.end_ms.saturating_sub(st.start_ms).max(1);
+            let p = ((now - st.start_ms) as f64 / span as f64).clamp(0.0, 1.0);
+            let v = st.from + (st.target - st.from) * p;
+            if let Some(pt) = self.points.get_mut(&key) {
+                if (pt.value - v).abs() > f64::EPSILON {
+                    pt.value = v;
+                    pt.ts_ms = now;
+                }
+            }
+            if p >= 1.0 {
+                self.act_states.remove(&key);
+            }
+        }
+    }
+
+    /// 运行状态机：电源/自检/链路状态决定 Boot/Ready/Run/Degraded/Fault。
+    fn update_state(&mut self, now: u64) {
+        let active = self
+            .sessions
+            .values()
+            .any(|s| s.stage == Stage::Active && s.error.is_none());
+        let degraded = self
+            .sessions
+            .values()
+            .any(|s| s.error.is_some() || s.stage == Stage::Stale);
+        let next = if !self.powered {
+            DeviceState::Fault
+        } else if now < self.start_ms.saturating_add(self.boot_ms as u64) {
+            DeviceState::Boot
+        } else if !self.awake || !self.rx_on || degraded {
+            DeviceState::Degraded
+        } else if active {
+            DeviceState::Run
+        } else {
+            DeviceState::Ready
+        };
+        if next != self.state {
+            self.state = next;
+            self.state_since = now;
+            self.counters.state_changes += 1;
+        }
+    }
+
+    /// 外部事件（断电/休眠/接收关闭）后刷新状态机，保证面板立即反映。
+    pub fn refresh_state(&mut self, now: u64) {
+        self.update_state(now);
     }
 
     fn update_simulated_points(&mut self, now: u64) {
@@ -3261,14 +3424,66 @@ impl Device {
             ));
             return;
         }
-        let p = self.points.entry((index, sub)).or_insert(PointState {
-            value: 0.0,
-            ts_ms: now,
-            quality: quality::GOOD,
-        });
-        p.value = value;
-        p.ts_ms = now;
-        p.quality = quality::GOOD;
+        let key = (index, sub);
+        if let Some(act) = self.actuators.get(&key).cloned() {
+            // 执行器：受理写入后按行程时间/速率逼近目标，期间上报真实位置。
+            let current = self.points.get(&key).map(|p| p.value).unwrap_or(0.0);
+            let was_on = current >= 0.5;
+            let will_on = value >= 0.5;
+            let last = self
+                .act_states
+                .get(&key)
+                .map(|s| s.last_switch_ms)
+                .unwrap_or(0);
+            let mut start = now;
+            if was_on != will_on && last > 0 {
+                let hold = if was_on { act.min_on_ms } else { act.min_off_ms };
+                if hold > 0 {
+                    start = now.max(last + hold);
+                }
+            }
+            let duration = if act.rate > 0.0 {
+                (((value - current).abs() / act.rate) * 1000.0)
+                    .round()
+                    .max(1.0) as u64
+            } else {
+                (act.travel_ms as u64).max(1)
+            };
+            let end = start + duration;
+            self.act_states.insert(
+                key,
+                ActState {
+                    target: value,
+                    from: current,
+                    start_ms: start,
+                    end_ms: end,
+                    last_switch_ms: if was_on != will_on { end } else { last },
+                },
+            );
+            self.counters.actuator_moves += 1;
+            out.push(self.trace(
+                "actuator",
+                f.src,
+                format!(
+                    "执行器 {index}/{sub} 目标 {value:.3}，{} ms 到位{}",
+                    duration,
+                    if start > now {
+                        format!("（最小保持等待 {} ms）", start - now)
+                    } else {
+                        String::new()
+                    }
+                ),
+            ));
+        } else {
+            let p = self.points.entry((index, sub)).or_insert(PointState {
+                value: 0.0,
+                ts_ms: now,
+                quality: quality::GOOD,
+            });
+            p.value = value;
+            p.ts_ms = now;
+            p.quality = quality::GOOD;
+        }
         self.counters.writes_ok += 1;
         if let Some(o) = self.owner.as_mut() {
             o.expires_ms = now + DEFAULT_TTL_MS as u64;

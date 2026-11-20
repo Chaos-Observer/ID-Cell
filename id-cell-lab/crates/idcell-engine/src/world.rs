@@ -1183,6 +1183,8 @@ impl World {
     pub fn set_device_asleep(&mut self, name: &str, on: bool) -> bool {
         if let Some(i) = self.resolve(name) {
             self.devices[i].set_asleep(on);
+            let now = self.now_ms;
+            self.devices[i].refresh_state(now);
             let label = if on { "进入休眠" } else { "唤醒" };
             self.trace
                 .push(TraceEntry::new(self.now_ms, "fault", name, "", "", label.to_string()));
@@ -1196,6 +1198,8 @@ impl World {
     pub fn set_device_rx(&mut self, name: &str, on: bool) -> bool {
         if let Some(i) = self.resolve(name) {
             self.devices[i].set_rx_on(on);
+            let now = self.now_ms;
+            self.devices[i].refresh_state(now);
             let label = if on { "打开接收机" } else { "关闭接收机" };
             self.trace
                 .push(TraceEntry::new(self.now_ms, "fault", name, "", "", label.to_string()));
@@ -1210,6 +1214,8 @@ impl World {
     pub fn set_device_power(&mut self, name: &str, on: bool) -> bool {
         if let Some(i) = self.resolve(name) {
             self.devices[i].set_power(on);
+            let now = self.now_ms;
+            self.devices[i].refresh_state(now);
             let label = if on { "上电" } else { "断电" };
             self.trace
                 .push(TraceEntry::new(self.now_ms, "fault", name, "", "", label.to_string()));
@@ -1591,6 +1597,14 @@ impl World {
         self.devices.iter().map(|d| d.counters.provision_sent).sum()
     }
 
+    pub fn total_actuator_moves(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.actuator_moves).sum()
+    }
+
+    pub fn total_state_changes(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.state_changes).sum()
+    }
+
     pub fn total_provision_ok(&self) -> u64 {
         self.devices.iter().map(|d| d.counters.provision_ok).sum()
     }
@@ -1812,6 +1826,8 @@ impl World {
                 reqs: d.reqs.len(),
                 publishing: d.publishing,
                 relay: d.relay,
+                state: d.state.name(),
+                state_since: d.state_since,
                 sessions,
                 values,
                 queries,
@@ -1931,6 +1947,9 @@ pub struct DeviceView {
     pub reqs: usize,
     pub publishing: bool,
     pub relay: bool,
+    /// 运行状态机：boot / ready / run / degraded / fault
+    pub state: &'static str,
+    pub state_since: u64,
     pub sessions: Vec<SessionView>,
     pub values: Vec<ValueView>,
     pub queries: Vec<QueryView>,
@@ -2058,7 +2077,7 @@ impl Snapshot {
                 s.push(',');
             }
             s.push_str(&format!(
-                "{{\"name\":\"{}\",\"did\":\"{}\",\"profile\":\"{}\",\"prof\":{},\"rules\":{},\"presence\":{},\"awake\":{},\"rx_on\":{},\"powered\":{},\"caps\":{},\"reqs\":{},\"publishing\":{},\"relay\":{},\"owner_token\":{},\"owner_peer\":{},",
+                "{{\"name\":\"{}\",\"did\":\"{}\",\"profile\":\"{}\",\"prof\":{},\"rules\":{},\"presence\":{},\"awake\":{},\"rx_on\":{},\"powered\":{},\"caps\":{},\"reqs\":{},\"publishing\":{},\"relay\":{},\"state\":\"{}\",\"state_since\":{},\"owner_token\":{},\"owner_peer\":{},",
                 json_escape(&d.name),
                 d.did,
                 d.profile,
@@ -2072,6 +2091,8 @@ impl Snapshot {
                 d.reqs,
                 d.publishing,
                 d.relay,
+                d.state,
+                d.state_since,
                 d.owner_token,
                 match &d.owner_peer {
                     Some(p) => format!("\"{}\"", json_escape(p)),
@@ -2119,7 +2140,7 @@ impl Snapshot {
             }
             s.push_str("],\"counters\":{");
             s.push_str(&format!(
-                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"link_ack_tx\":{},\"dup_drops\":{},\"provision_sent\":{},\"provision_ok\":{},\"provision_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{}",
+                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"link_ack_tx\":{},\"dup_drops\":{},\"provision_sent\":{},\"provision_ok\":{},\"provision_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{},\"actuator_moves\":{},\"state_changes\":{}",
                 d.counters.tx,
                 d.counters.rx,
                 d.counters.binds_ok,
@@ -2162,7 +2183,9 @@ impl Snapshot {
                 d.counters.desc_reassemble_ok,
                 d.counters.desc_crc_errors,
                 d.counters.desc_oversize,
-                d.counters.logic_fired
+                d.counters.logic_fired,
+                d.counters.actuator_moves,
+                d.counters.state_changes
             ));
             s.push_str("},\"queries\":[");
             for (j, q) in d.queries.iter().enumerate() {
