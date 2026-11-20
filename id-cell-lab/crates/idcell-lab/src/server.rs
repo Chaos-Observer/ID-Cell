@@ -389,6 +389,18 @@ fn inject_fault(sim: &Arc<Mutex<Sim>>, body: &[u8]) -> Result<String, String> {
         hop_limit: json.u64_field("hop_limit").unwrap_or(0) as u32,
         frame_type: json.u64_field("frame_type").unwrap_or(0) as u8,
         flags: json.u64_field("flags").unwrap_or(0) as u8,
+        group_id: json.u64_field("group_id").unwrap_or(0) as u16,
+        expected: json.str_field("expected").unwrap_or_default(),
+        response_timeout_ms: json.u64_field("response_timeout_ms").unwrap_or(1000) as u32,
+        group_epoch: json.u64_field("group_epoch").unwrap_or(1) as u32,
+        response_mode: match json.str_field("response_mode").as_deref() {
+            Some("none") => idcell_core::consts::response_mode::NONE,
+            Some("required") => idcell_core::consts::response_mode::REQUIRED,
+            _ => json
+                .u64_field("response_mode")
+                .unwrap_or(idcell_core::consts::response_mode::REQUIRED as u64)
+                as u8,
+        },
     };
     let mut guard = sim.lock().map_err(|_| "状态锁损坏".to_string())?;
     apply_fault(&mut guard.world, &fault)?;

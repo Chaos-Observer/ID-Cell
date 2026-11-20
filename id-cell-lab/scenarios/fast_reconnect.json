@@ -1,0 +1,46 @@
+{
+  "name": "快速重连：复用 binding_id 与公共描述缓存（FR-028）",
+  "duration_ms": 12000,
+  "seed": 7,
+  "key": "idcell-lab-key",
+  "link": { "delay_ms": 2, "media": "can", "topology": "p2p", "t_link_min_ms": 2, "mtu": 0 },
+  "devices": [
+    {
+      "name": "plc-01",
+      "did": "00000000-00000031",
+      "caps": [
+        {
+          "index": 3,
+          "sub": 0,
+          "label": "油压",
+          "qty": "pressure",
+          "unit": "kPa",
+          "dtype": "f64",
+          "t_prod_ms": 20,
+          "stale_ms": 800
+        }
+      ],
+      "values": [
+        { "index": 3, "sub": 0, "base": 300.0, "amplitude": 20.0, "period_ms": 1500, "noise": 1.0 }
+      ]
+    },
+    {
+      "name": "hmi-01",
+      "did": "00000000-00000032",
+      "reqs": [
+        { "qty": "pressure", "unit": "kPa", "want_ms": 50, "stale_ms": 400 }
+      ]
+    }
+  ],
+  "faults": [
+    { "at_ms": 1500, "kind": "partition", "a": "plc-01", "b": "hmi-01" },
+    { "at_ms": 7000, "kind": "heal", "a": "plc-01", "b": "hmi-01" }
+  ],
+  "asserts": [
+    { "kind": "resumes_ok", "op": ">=", "value": 1, "description": "重连复用旧绑定与描述缓存" },
+    { "kind": "resumed", "device": "hmi-01", "peer": "plc-01", "description": "消费者会话标记为复用恢复" },
+    { "kind": "bound", "op": ">=", "value": 2, "description": "首次绑定 + 重连后再次完成绑定" },
+    { "kind": "stage", "device": "hmi-01", "peer": "plc-01", "stage": "active", "description": "恢复后回到 Active" },
+    { "kind": "value", "device": "hmi-01", "index": 3, "sub": 0, "op": ">", "value": 0, "tolerance": 100000, "description": "恢复后重新收到压力值" }
+  ]
+}

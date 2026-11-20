@@ -7,6 +7,8 @@
 //!   bound        —— binds_ok 至少一次（value 可指定最少次数）
 //!   binds_ok / binds_fail / stale_events / timeouts /
 //!   writes_ok / writes_rejected / events_rx —— 全局计数器阈值
+//!   resumes_ok —— 断链重连复用绑定/描述缓存的次数（FR-028）
+//!   resumed       —— device 对 peer 的会话是否经描述缓存复用恢复（device/peer 字段）
 //!   queries_sent / replies_rx / queries_answered / query_timeouts —— 查询计数器
 //!   query_replies —— 指定 device 聚合到的应答条数（device 字段）
 //!   value        —— device 收到的点值（index/sub），带容差
@@ -63,6 +65,12 @@ fn counter(world: &World, kind: &str) -> Option<u64> {
         "query_timeouts" => world.total_query_timeouts(),
         "logic" => world.total_logic_fired(),
         "proto_rejects" => world.total_proto_rejects(),
+        "resumes_ok" => world.total_resumes_ok(),
+        "group_ok" => world.total_group_ok(),
+        "group_missing" => world.total_group_missing(),
+        "group_rejects" => world.total_group_rejects(),
+        "config_ok" => world.total_config_ok(),
+        "config_rejects" => world.total_config_rejects(),
         "frames_tx" => m.frames_tx,
         "frames_rx" => m.frames_rx,
         "drops" => m.drops,
@@ -165,6 +173,16 @@ pub fn evaluate_one(world: &World, def: &AssertDef) -> AssertResult {
             result.detail = format!(
                 "{} 查询应答 {count} {} {}",
                 def.device, def.op, def.value
+            );
+        }
+        "resumed" => {
+            let resumed = world.session_resumed(&def.device, &def.peer);
+            result.passed = resumed;
+            result.detail = format!(
+                "{}/{} 会话{}复用描述缓存",
+                def.device,
+                def.peer,
+                if resumed { "已" } else { "未" }
             );
         }
         "frame" => {

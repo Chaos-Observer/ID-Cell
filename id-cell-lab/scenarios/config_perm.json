@@ -1,0 +1,47 @@
+{
+  "name": "CONFIG 权限：E_PERM 拒绝且不影响既有契约（FR-065）",
+  "duration_ms": 2600,
+  "seed": 23,
+  "key": "idcell-lab-key",
+  "link": { "delay_ms": 1, "media": "ethernet", "topology": "p2p", "t_link_min_ms": 1 },
+  "devices": [
+    {
+      "name": "plc-a",
+      "did": "00000000-00000051",
+      "caps": [
+        { "index": 7, "sub": 0, "label": "阀门开度", "qty": "ratio", "unit": "%", "dtype": "f64", "perm": 3, "dir": 3, "t_prod_ms": 50, "stale_ms": 2000 }
+      ],
+      "values": [ { "index": 7, "sub": 0, "base": 40.0, "amplitude": 5.0, "period_ms": 3000 } ]
+    },
+    {
+      "name": "plc-b",
+      "did": "00000000-00000052",
+      "caps": [
+        { "index": 7, "sub": 0, "label": "阀门开度", "qty": "ratio", "unit": "%", "dtype": "f64", "perm": 1, "dir": 3, "t_prod_ms": 50, "stale_ms": 2000 }
+      ],
+      "values": [ { "index": 7, "sub": 0, "base": 20.0, "amplitude": 5.0, "period_ms": 3000 } ]
+    },
+    {
+      "name": "hmi-a",
+      "did": "00000000-00000053",
+      "reqs": [ { "qty": "ratio", "unit": "%", "kind": 1, "perm": 3, "want_ms": 100, "stale_ms": 2000 } ]
+    },
+    {
+      "name": "hmi-b",
+      "did": "00000000-00000054",
+      "reqs": [ { "qty": "ratio", "unit": "%", "kind": 1, "perm": 1, "want_ms": 100, "stale_ms": 2000 } ]
+    }
+  ],
+  "faults": [
+    { "at_ms": 1400, "kind": "config", "device": "hmi-a", "peer": "plc-a", "index": 7, "sub": 0, "value": 3, "intent": "调整点位权限等级" },
+    { "at_ms": 1600, "kind": "config", "device": "hmi-b", "peer": "plc-b", "index": 7, "sub": 0, "value": 3, "intent": "越权修改配置" },
+    { "at_ms": 2000, "kind": "write", "device": "hmi-a", "peer": "plc-a", "index": 7, "sub": 0, "value": 55.0, "intent": "配置后继续写值" }
+  ],
+  "asserts": [
+    { "kind": "config_ok", "op": ">=", "value": 1, "description": "P3 消费者可修改配置项" },
+    { "kind": "config_rejects", "op": ">=", "value": 1, "description": "P1 消费者修改 P2 配置项被 E_PERM 拒绝" },
+    { "kind": "writes_ok", "op": ">=", "value": 1, "description": "配置后数据写入仍按既有契约执行" },
+    { "kind": "stage", "device": "hmi-a", "peer": "plc-a", "stage": "active", "description": "成功后会话保持 Active" },
+    { "kind": "stage", "device": "hmi-b", "peer": "plc-b", "stage": "active", "description": "被拒后既有契约不受影响" }
+  ]
+}

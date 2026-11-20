@@ -1,12 +1,13 @@
 //! 虚拟设备：能力/需求、六段管道状态机、运行期租约/心跳/发布/抢占。
 
 use idcell_core::consts::{
-    bind_phase, err_field, ftype, query_mode, quality, tlv_type, DISCOVER_PROBE, FLAG_COMPRESS,
-    FLAG_ENCRYPT, ROLE_CAPABILITY, ROLE_REQUIREMENT,
+    bind_phase, err_field, ftype, group_phase, query_mode, quality, response_mode, tlv_type,
+    CONFIG_MIN_PERM, DISCOVER_PROBE, FLAG_COMPRESS, FLAG_ENCRYPT, ROLE_CAPABILITY,
+    ROLE_REQUIREMENT,
 };
-use idcell_core::desc::matches;
+use idcell_core::desc::{matches, matches_public};
 use idcell_core::{
-    decode_tlvs, decode_value, encode_value, hmac_sha256, Capability, Did, ErrCode, Frame,
+    crc16, decode_tlvs, decode_value, encode_value, hmac_sha256, Capability, Did, ErrCode, Frame,
     Requirement, Selector, TlvWriter,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -166,6 +167,40 @@ pub struct Contract {
     pub stale_ms: u32,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct BindingCache {
+    pub binding_id: u32,
+    pub desc_version: u32,
+    pub desc_crc: u32,
+    /// 上一次成功绑定的 session_id；重连时作为 OLD_SESSION 校验，绝不直接复用。
+    pub session_id: u64,
+    /// 上一次的授权纪元；重连只用于校验，新会话必须使用新纪元。
+    pub grant_epoch: u64,
+    pub index: u16,
+    pub sub: u8,
+}
+
+/// 消费者缓存的公共描述视图（FR-006/FR-028）。
+#[derive(Debug, Clone)]
+pub struct DescCache {
+    pub desc_version: u32,
+    pub desc_crc: u32,
+    pub caps: Vec<Capability>,
+}
+
+/// 公共描述视图的版本与完整性摘要：双方 MUST 由同一字节序列算出。
+fn descriptor_digest(caps: &[Capability]) -> (u32, u32) {
+    let mut buf = Vec::new();
+    for cap in caps {
+        buf.extend_from_slice(&cap.index.to_be_bytes());
+        buf.push(cap.sub);
+        let enc = cap.encode_public();
+        buf.extend_from_slice(&(enc.len() as u32).to_be_bytes());
+        buf.extend_from_slice(&enc);
+    }
+    (1, crc16(&buf) as u32)
+}
+
 #[derive(Debug, Clone)]
 pub struct Lease {
     pub peer: Did,
@@ -198,6 +233,8 @@ pub struct Session {
     pub error: Option<ErrCode>,
     pub nonce: [u8; 16],
     pub bind_phase: u8,
+    /// 本次会话是否复用了公共描述缓存（FR-028）。
+    pub resumed: bool,
 }
 
 impl Session {
@@ -224,6 +261,7 @@ impl Session {
             error: None,
             nonce: [0; 16],
             bind_phase: 0,
+            resumed: false,
         }
     }
 }
@@ -251,8 +289,22 @@ pub struct DeviceCounters {
     pub query_timeouts: u64,
     /// 未实现帧类型/未支持标志被拒绝的次数
     pub proto_rejects: u64,
+    /// 断链重连时复用绑定与描述缓存的次数（FR-028）。
+    pub resumes_ok: u64,
     /// 行为规则命中次数
     pub logic_fired: u64,
+    /// 可靠组播轮次（完成或超时）
+    pub group_rounds: u64,
+    /// 全部期望成员按时应答
+    pub group_ok: u64,
+    /// 有成员缺席
+    pub group_missing: u64,
+    /// 组声明/组播被拒（缺 group_epoch/成员判据、纪元不匹配）
+    pub group_rejects: u64,
+    /// CONFIG 成功应用
+    pub config_ok: u64,
+    /// CONFIG 因权限不足被拒（E_PERM）
+    pub config_rejects: u64,
 }
 
 /// 单条查询应答（发起方聚合用）。
@@ -283,6 +335,17 @@ pub struct QuerySession {
     /// 已收到 REPLY_END 的提供者数。
     pub ended: u32,
     pub done: bool,
+}
+
+/// 一轮可靠组播：预期成员、已应答成员与截止时刻（FR-070）。
+#[derive(Debug, Clone)]
+pub struct GroupRound {
+    pub gid: u16,
+    pub txn: u16,
+    pub expected: BTreeSet<Did>,
+    pub responders: BTreeSet<Did>,
+    pub deadline_ms: u64,
+    pub epoch: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -391,10 +454,24 @@ pub struct Device {
     /// 本端发起的查询会话（以 QUERY_ID 为键）。
     pub queries: BTreeMap<u32, QuerySession>,
     pub next_query_id: u32,
+    /// 公共描述视图版本与摘要（FR-006），HELLO/AUTH/NEGOTIATE 中保持一致。
+    pub desc_version: u32,
+    pub desc_crc: u32,
+    /// 稳定绑定缓存：同一 peer/能力点在描述未变时复用 binding_id（FR-028）。
+    pub bindings: BTreeMap<(Did, u16, u8), BindingCache>,
+    /// 消费者缓存的公共描述视图，重连时跳过重复拉取（FR-028）。
+    pub desc_cache: BTreeMap<Did, DescCache>,
+    /// 授权纪元计数器：每次绑定都递增，旧纪元不得恢复。
+    pub grant_epoch: u64,
+    /// 当前可靠组播轮次（None 表示没有等待成员的组声明）。
+    pub group_pending: Option<GroupRound>,
+    /// 本机成员关系纪元；组声明中的 group_epoch 必须与之一致。
+    pub group_epoch: u32,
 }
 
 impl Device {
     pub fn new(id: usize, spec: DeviceSpec, mode: RunMode) -> Self {
+        let (desc_version, desc_crc) = descriptor_digest(&spec.caps);
         let mut points = BTreeMap::new();
         for cap in &spec.caps {
             // 可写点也要有点位状态，否则 WRITE 无处落地；初值取模拟量在 t=0 的值。
@@ -448,6 +525,13 @@ impl Device {
             rules: spec.rules,
             queries: BTreeMap::new(),
             next_query_id: 1,
+            desc_version,
+            desc_crc,
+            bindings: BTreeMap::new(),
+            desc_cache: BTreeMap::new(),
+            grant_epoch: 1,
+            group_pending: None,
+            group_epoch: 1,
         }
     }
 
@@ -499,8 +583,335 @@ impl Device {
         self.caps.iter().find(|c| c.index == index && c.sub == sub)
     }
 
+    /// 提供方侧稳定绑定号：同一 peer/点在描述版本不变时保持不变；
+    /// 描述发生实质变更（desc_version 变化）时自然派生新 binding_id（FR-028）。
+    fn binding_for(&mut self, peer: Did, index: u16, sub: u8) -> u32 {
+        let key = (peer, index, sub);
+        if let Some(b) = self.bindings.get(&key) {
+            if b.desc_version == self.desc_version && b.binding_id != 0 {
+                return b.binding_id;
+            }
+        }
+        let seed = (self.did.0[4] as u32) << 24
+            | (self.did.0[5] as u32) << 16
+            | (self.did.0[6] as u32) << 8
+            | self.did.0[7] as u32;
+        let mut x = seed
+            ^ (peer.0[7] as u32).wrapping_mul(0x9E37_79B9)
+            ^ (index as u32).wrapping_mul(0x85EB_CA6B)
+            ^ ((sub as u32) << 16)
+            ^ self.desc_version.wrapping_mul(0xC2B2_AE35);
+        x ^= x >> 15;
+        x = x.wrapping_mul(0x2545_F491);
+        x ^= x >> 13;
+        let id = x.max(1);
+        let entry = self.bindings.entry(key).or_default();
+        entry.binding_id = id;
+        entry.desc_version = self.desc_version;
+        entry.desc_crc = self.desc_crc;
+        entry.index = index;
+        entry.sub = sub;
+        id
+    }
+
     pub fn session(&self, peer: Did) -> Option<&Session> {
         self.sessions.get(&peer)
+    }
+
+    // ------------------------------------------------------------ 组播（FR-070）
+
+    /// 发起组声明：`mode=REQUIRED` 时必须有 group_epoch 与期望成员，否则拒绝。
+    pub fn request_group_declare(
+        &mut self,
+        now: u64,
+        gid: u16,
+        expected: Vec<Did>,
+        timeout_ms: u32,
+        mode: u8,
+        epoch: u32,
+    ) -> Vec<Action> {
+        let mut out = Vec::new();
+        if gid == 0 || self.group != gid {
+            self.counters.group_rejects += 1;
+            out.push(self.trace(
+                "group_reject",
+                Did::broadcast(),
+                format!("组号 {gid} 无效或本机不在该组，拒绝组声明"),
+            ));
+            return out;
+        }
+        if mode == response_mode::REQUIRED && (epoch == 0 || expected.is_empty()) {
+            self.counters.group_rejects += 1;
+            out.push(self.trace(
+                "group_reject",
+                Did::broadcast(),
+                "可靠组播缺少 group_epoch 或成员判据 → 拒绝".to_string(),
+            ));
+            return out;
+        }
+        let txn = self.next_txn();
+        let mut w = TlvWriter::new();
+        w.field_u8(tlv_type::MESSAGE, group_phase::DECLARE);
+        let _ = w.raw_put(0, 0, tlv_type::GROUP_ID, &gid.to_be_bytes());
+        w.field_u8(tlv_type::RESPONSE_MODE, mode);
+        if epoch > 0 {
+            w.field_u32(tlv_type::GROUP_EPOCH, epoch);
+        }
+        if mode == response_mode::REQUIRED {
+            w.field_u32(tlv_type::RESPONSE_TIMEOUT, timeout_ms.max(1));
+            w.field_u32(tlv_type::EXPECTED_MEMBERS, expected.len() as u32);
+            self.group_pending = Some(GroupRound {
+                gid,
+                txn,
+                expected: expected.into_iter().collect(),
+                responders: BTreeSet::new(),
+                deadline_ms: now + timeout_ms.max(1) as u64,
+                epoch,
+            });
+        }
+        out.push(self.frame(now, ftype::GROUP, Did::broadcast(), txn, w.finish()));
+        out.push(self.trace(
+            "group_declare",
+            Did::broadcast(),
+            if mode == response_mode::REQUIRED {
+                format!("组 {} 可靠组播：等待成员应答，超时 {} ms", gid, timeout_ms.max(1))
+            } else {
+                format!("组 {} 普通组播：不要求响应", gid)
+            },
+        ));
+        out
+    }
+
+    /// 发起 CONFIG：与数据写入受同一套权限判定（FR-065）。
+    pub fn request_config(
+        &mut self,
+        now: u64,
+        peer: Did,
+        index: u16,
+        sub: u8,
+        new_perm: u8,
+        intent: &str,
+    ) -> Vec<Action> {
+        let mut out = Vec::new();
+        let token = self
+            .sessions
+            .get(&peer)
+            .and_then(|s| s.contract.as_ref())
+            .map(|c| c.owner_token)
+            .unwrap_or(0);
+        let txn = self.next_txn();
+        let mut w = TlvWriter::new();
+        w.put_u16(index, sub, tlv_type::INDEX, index);
+        w.field_u8(tlv_type::PERM, new_perm.min(3));
+        w.field_str(tlv_type::INTENT, intent);
+        w.field_u32(tlv_type::OWNER, token);
+        out.push(self.frame(now, ftype::CONFIG, peer, txn, w.finish()));
+        out.push(self.trace(
+            "config",
+            peer,
+            format!("申请配置 {index}/{sub} 权限等级 → P{}", new_perm.min(3)),
+        ));
+        out
+    }
+
+    fn check_groups(&mut self, now: u64, out: &mut Vec<Action>) {
+        let Some(r) = self.group_pending.clone() else {
+            return;
+        };
+        if now < r.deadline_ms {
+            return;
+        }
+        self.group_pending = None;
+        self.counters.group_rounds += 1;
+        let missing: Vec<Did> = r.expected.difference(&r.responders).copied().collect();
+        if missing.is_empty() {
+            self.counters.group_ok += 1;
+            out.push(self.trace(
+                "group_ok",
+                Did::broadcast(),
+                format!("组 {} 全部 {} 个成员已应答", r.gid, r.expected.len()),
+            ));
+        } else {
+            self.counters.group_missing += 1;
+            out.push(self.trace(
+                "group_absent",
+                Did::broadcast(),
+                format!(
+                    "组 {} 应答超时，缺席 {}/{}：{}",
+                    r.gid,
+                    missing.len(),
+                    r.expected.len(),
+                    missing.iter().map(|d| d.to_hex()).collect::<Vec<_>>().join(",")
+                ),
+            ));
+        }
+    }
+
+    fn on_group(&mut self, now: u64, f: &Frame, out: &mut Vec<Action>) {
+        let Ok(tlvs) = decode_tlvs(&f.payload) else {
+            return;
+        };
+        let gid = get_u32(&tlvs, tlv_type::GROUP_ID).unwrap_or(f.group as u32) as u16;
+        if gid == 0 || self.group != gid {
+            return;
+        }
+        match get_u8(&tlvs, tlv_type::MESSAGE).unwrap_or(0) {
+            group_phase::DECLARE => {
+                let mode = get_u8(&tlvs, tlv_type::RESPONSE_MODE).unwrap_or(0);
+                let epoch = get_u32(&tlvs, tlv_type::GROUP_EPOCH);
+                let expected = get_u32(&tlvs, tlv_type::EXPECTED_MEMBERS);
+                if mode == response_mode::REQUIRED {
+                    if epoch.is_none() || expected.unwrap_or(0) == 0 {
+                        self.counters.group_rejects += 1;
+                        self.send_error(
+                            now,
+                            f.src,
+                            ErrCode::Conv,
+                            "可靠组播声明缺少 group_epoch/成员判据",
+                            out,
+                        );
+                        return;
+                    }
+                    if epoch != Some(self.group_epoch) {
+                        self.counters.group_rejects += 1;
+                        self.send_error(
+                            now,
+                            f.src,
+                            ErrCode::State,
+                            "group_epoch 与本地成员关系不一致",
+                            out,
+                        );
+                        return;
+                    }
+                    let mut w = TlvWriter::new();
+                    w.field_u8(tlv_type::MESSAGE, group_phase::REPORT);
+                    let _ = w.raw_put(0, 0, tlv_type::GROUP_ID, &gid.to_be_bytes());
+                    w.field_u32(tlv_type::GROUP_EPOCH, epoch.unwrap_or(0));
+                    out.push(self.frame(now, ftype::GROUP, f.src, f.txn, w.finish()));
+                    out.push(self.trace(
+                        "group_checkin",
+                        f.src,
+                        format!("加入组 {gid} 的可靠组播应答"),
+                    ));
+                } else {
+                    out.push(self.trace(
+                        "group_rx",
+                        f.src,
+                        format!("收到组 {gid} 普通组播，不回复"),
+                    ));
+                }
+            }
+            group_phase::REPORT => {
+                let epoch = get_u32(&tlvs, tlv_type::GROUP_EPOCH).unwrap_or(0);
+                let mut complete = false;
+                if let Some(r) = self.group_pending.as_mut() {
+                    if r.gid == gid && r.epoch == epoch {
+                        r.responders.insert(f.src);
+                        complete = r.expected.iter().all(|d| r.responders.contains(d));
+                    }
+                }
+                if complete {
+                    if let Some(r) = self.group_pending.take() {
+                        self.counters.group_rounds += 1;
+                        self.counters.group_ok += 1;
+                        out.push(self.trace(
+                            "group_ok",
+                            Did::broadcast(),
+                            format!("组 {} 全部 {} 个成员已应答", r.gid, r.expected.len()),
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn on_config(&mut self, now: u64, f: &Frame, out: &mut Vec<Action>) {
+        if !matches!(self.mode, RunMode::Provider | RunMode::Both) {
+            return;
+        }
+        let Ok(tlvs) = decode_tlvs(&f.payload) else {
+            return;
+        };
+        let index = get_u16(&tlvs, tlv_type::INDEX).unwrap_or(0);
+        let sub = tlvs
+            .iter()
+            .find(|t| t.typ == tlv_type::INDEX)
+            .map(|t| t.sub)
+            .unwrap_or(0);
+        let token = get_u32(&tlvs, tlv_type::OWNER).unwrap_or(0);
+        let new_perm = get_u8(&tlvs, tlv_type::PERM).unwrap_or(0).min(3);
+        let intent = get_str(&tlvs, tlv_type::INTENT).unwrap_or_default();
+        let Some(cap) = self.cap(index, sub).cloned() else {
+            self.send_error(now, f.src, ErrCode::NoDev, "CONFIG 目标不存在", out);
+            return;
+        };
+        let (active, current_perm) = self
+            .sessions
+            .get(&f.src)
+            .map(|s| {
+                (
+                    s.stage == Stage::Active,
+                    s.requirement.as_ref().map(|r| r.perm).unwrap_or(0),
+                )
+            })
+            .unwrap_or((false, 0));
+        if !active {
+            self.counters.config_rejects += 1;
+            self.send_error(now, f.src, ErrCode::State, "CONFIG 需要 Active 会话", out);
+            return;
+        }
+        let lease_ok = self
+            .owner
+            .as_ref()
+            .map(|o| o.peer == f.src && o.token == token && o.expires_ms > now)
+            .unwrap_or(false);
+        if !lease_ok {
+            self.counters.config_rejects += 1;
+            self.send_error(now, f.src, ErrCode::Lease, "CONFIG 缺少有效 owner_token", out);
+            return;
+        }
+        if intent.trim().is_empty() {
+            self.counters.config_rejects += 1;
+            self.send_error(now, f.src, ErrCode::Perm, "CONFIG 缺少意图结构", out);
+            return;
+        }
+        // FR-065：配置项至少需要 P2；权限不足返回 E_PERM，错误体带被拒项、所需与当前权限。
+        let required = cap.perm.max(CONFIG_MIN_PERM);
+        if current_perm < required {
+            self.counters.config_rejects += 1;
+            let mut w = TlvWriter::new();
+            w.field_u8(err_field::CODE, ErrCode::Perm as u8);
+            w.put_u16(index, sub, err_field::INDEX, index);
+            w.field_u8(err_field::REQUIRED, required);
+            w.field_u8(err_field::CURRENT, current_perm);
+            w.field_str(err_field::REASON, "配置项需要更高实权限");
+            out.push(self.frame(now, ftype::ERROR, f.src, f.txn, w.finish()));
+            out.push(self.trace(
+                "config_reject",
+                f.src,
+                format!("CONFIG {index}/{sub} 被拒：需要 P{required}，当前 P{current_perm} → E_PERM"),
+            ));
+            return;
+        }
+        if let Some(c) = self
+            .caps
+            .iter_mut()
+            .find(|c| c.index == index && c.sub == sub)
+        {
+            c.perm = new_perm;
+        }
+        self.counters.config_ok += 1;
+        let mut w = TlvWriter::new();
+        w.field_u8(tlv_type::RESULT, ErrCode::Ok as u8);
+        w.put_u16(index, sub, tlv_type::INDEX, index);
+        w.field_u8(tlv_type::PERM, new_perm);
+        out.push(self.frame(now, ftype::ACK, f.src, f.txn, w.finish()));
+        out.push(self.trace(
+            "config_ok",
+            f.src,
+            format!("配置 {index}/{sub} 权限等级 → P{new_perm}，既有契约不随之改变"),
+        ));
     }
 
     pub fn active_sessions(&self) -> impl Iterator<Item = &Session> {
@@ -536,6 +947,7 @@ impl Device {
         self.check_leases(now, &mut out);
         self.check_consumer_stale(now, &mut out);
         self.check_queries(now, &mut out);
+        self.check_groups(now, &mut out);
         self.publish_due(now, &mut out);
         out
     }
@@ -619,6 +1031,9 @@ impl Device {
                 push(q.deadline_ms);
             }
         }
+        if let Some(g) = self.group_pending.as_ref() {
+            push(g.deadline_ms);
+        }
         best
     }
 
@@ -686,6 +1101,39 @@ impl Device {
         w.field_u8(tlv_type::ROLE, ROLE_REQUIREMENT);
         w.field_u32(tlv_type::QUERY_ID, txn as u32);
         w.field_u32(tlv_type::HOP_LIMIT, 4);
+        // 断链重连：向曾经绑定的提供者定向探询，并携带旧 binding_id/desc_version，
+        // 让双方复用公共描述缓存、跳过重复拉取（FR-028）。旧 session_id 只作校验。
+        let resume = self.sessions.iter().find_map(|(peer, s)| {
+            if s.role != Role::Consumer
+                || !matches!(s.stage, Stage::Closed | Stage::Failed)
+            {
+                return None;
+            }
+            let c = s.contract.as_ref()?;
+            if c.binding_id == 0 || c.session_id == 0 {
+                return None;
+            }
+            let cache = self.desc_cache.get(peer)?;
+            if self.cap(c.index, c.sub).is_none()
+                && !cache.caps.iter().any(|x| x.index == c.index && x.sub == c.sub)
+            {
+                return None;
+            }
+            Some((*peer, c.binding_id, c.session_id, cache.desc_version, cache.desc_crc))
+        });
+        if let Some((peer, binding_id, session_id, ver, crc)) = resume {
+            w.field_u32(tlv_type::OLD_BINDING, binding_id);
+            w.field_u64(tlv_type::OLD_SESSION, session_id);
+            w.field_u32(tlv_type::DESC_VER, ver);
+            w.field_u32(tlv_type::DESC_CRC, crc);
+            out.push(self.frame(now, ftype::DISCOVER, peer, txn, w.finish()));
+            out.push(self.trace(
+                "discover_resume",
+                peer,
+                format!("携带旧绑定 0x{binding_id:08X}/desc v{ver} 定向重连，请求复用描述缓存"),
+            ));
+            return;
+        }
         out.push(self.frame(now, ftype::DISCOVER, Did::broadcast(), txn, w.finish()));
         out.push(self.trace("discover", Did::broadcast(), "发送 DISCOVER（广播）"));
     }
@@ -992,6 +1440,8 @@ impl Device {
                 }
             }
             ftype::EVENT => self.on_event(now, &f, &mut out),
+            ftype::GROUP => self.on_group(now, &f, &mut out),
+            ftype::CONFIG => self.on_config(now, &f, &mut out),
             ftype::QUERY => self.on_query(now, &f, &mut out),
             ftype::REPLY => self.on_reply(now, &f, &mut out),
             ftype::REPLY_END => self.on_reply_end(now, &f, &mut out),
@@ -1003,7 +1453,7 @@ impl Device {
             ftype::OFFLINE => self.on_offline(now, &f, &mut out),
             ftype::ERROR => self.on_error(now, &f, &mut out),
             _ => {
-                // 已知但暂未实现（GROUP/CONFIG/PROVISION/CMD/DONE）或未知类型：
+                // 已知但暂未实现（PROVISION/CMD/DONE）或未知类型：
                 // 返回结构化错误，避免被静默忽略。
                 self.counters.proto_rejects += 1;
                 self.send_error(
@@ -1055,18 +1505,41 @@ impl Device {
         self.discover_seen.insert(f.src, (f.txn, now));
 
         let txn = self.next_txn();
+        // 重连复用：旧 binding_id + 旧 session_id + 相同 desc_version 才允许跳过描述拉取。
+        let old_binding = get_u32(&tlvs, tlv_type::OLD_BINDING);
+        let old_session = get_u64(&tlvs, tlv_type::OLD_SESSION);
+        let want_ver = get_u32(&tlvs, tlv_type::DESC_VER);
+        let resume = match (old_binding, old_session, want_ver) {
+            (Some(bid), Some(sid), Some(ver)) => {
+                ver == self.desc_version
+                    && self.bindings.iter().any(|((peer, _, _), b)| {
+                        *peer == f.src && b.binding_id == bid && b.session_id == sid
+                    })
+            }
+            _ => false,
+        };
         let mut w = TlvWriter::new();
         w.field_u8(tlv_type::ROLE, ROLE_CAPABILITY);
-        w.field_u32(tlv_type::DESC_VER, 1);
+        w.field_u32(tlv_type::DESC_VER, self.desc_version);
+        w.field_u32(tlv_type::DESC_CRC, self.desc_crc);
         w.field_str(tlv_type::SUMMARY, &self.name);
-        for cap in &self.caps {
-            let _ = w.raw_put(cap.index, cap.sub, tlv_type::CAP_DESC, &cap.encode_public());
+        if resume {
+            // 公共视图未变：不重复发送 CAP_DESC，消费者直接复用缓存。
+            w.field_u8(tlv_type::RESUMED, 1);
+        } else {
+            for cap in &self.caps {
+                let _ = w.raw_put(cap.index, cap.sub, tlv_type::CAP_DESC, &cap.encode_public());
+            }
         }
         out.push(self.frame(now, ftype::HELLO, f.src, txn, w.finish()));
         out.push(self.trace(
             "hello",
             f.src,
-            format!("回应 DISCOVER，公布 {} 个能力点", self.caps.len()),
+            if resume {
+                format!("响应重连探询，命中描述缓存 v{}（desc_crc=0x{:08X}）", self.desc_version, self.desc_crc)
+            } else {
+                format!("回应 DISCOVER，公布 {} 个能力点", self.caps.len())
+            },
         ));
     }
 
@@ -1078,25 +1551,71 @@ impl Device {
             Ok(t) => t,
             Err(_) => return,
         };
-        let caps: Vec<Capability> = tlvs
-            .iter()
-            .filter(|t| t.typ == tlv_type::CAP_DESC)
-            .filter_map(|t| {
-                Capability::decode(&t.value).ok().map(|mut c| {
-                    // 点标识在 TLV 头里，不在描述符体内——必须回填，否则所有点都退化成默认索引。
-                    c.index = t.idx;
-                    c.sub = t.sub;
-                    c
-                })
-            })
-            .collect();
-        if caps.is_empty() {
+        let resumed = get_u8(&tlvs, tlv_type::RESUMED) == Some(1);
+        let desc_ver = get_u32(&tlvs, tlv_type::DESC_VER);
+        let desc_crc = get_u32(&tlvs, tlv_type::DESC_CRC);
+        // FR-006：公共视图必须带版本与完整性摘要，否则不得进入 MATCH。
+        let (Some(desc_ver), Some(desc_crc)) = (desc_ver, desc_crc) else {
+            out.push(self.trace(
+                "desc_incomplete",
+                f.src,
+                "HELLO 缺少 DESC_VER/DESC_CRC，禁止 MATCH".to_string(),
+            ));
             return;
-        }
+        };
+        let caps: Vec<Capability> = if resumed {
+            let Some(cache) = self.desc_cache.get(&f.src).cloned() else {
+                out.push(self.trace("desc_cache_miss", f.src, "对方声称命中缓存但本端无缓存".to_string()));
+                return;
+            };
+            if cache.desc_version != desc_ver || cache.desc_crc != desc_crc {
+                out.push(self.trace(
+                    "desc_mismatch",
+                    f.src,
+                    format!("描述缓存不一致：本地 v{} 0x{:08X}，对方 v{} 0x{:08X}", cache.desc_version, cache.desc_crc, desc_ver, desc_crc),
+                ));
+                return;
+            }
+            cache.caps
+        } else {
+            let caps: Vec<Capability> = tlvs
+                .iter()
+                .filter(|t| t.typ == tlv_type::CAP_DESC)
+                .filter_map(|t| {
+                    Capability::decode(&t.value).ok().map(|mut c| {
+                        // 点标识在 TLV 头里，不在描述符体内——必须回填，否则所有点都退化成默认索引。
+                        c.index = t.idx;
+                        c.sub = t.sub;
+                        c
+                    })
+                })
+                .collect();
+            if caps.is_empty() {
+                return;
+            }
+            let (ver, crc) = descriptor_digest(&caps);
+            if ver != desc_ver || crc != desc_crc {
+                out.push(self.trace(
+                    "desc_mismatch",
+                    f.src,
+                    format!("公共描述视图校验失败：算出 0x{crc:08X}，声明 0x{desc_crc:08X}"),
+                ));
+                return;
+            }
+            self.desc_cache.insert(
+                f.src,
+                DescCache {
+                    desc_version: ver,
+                    desc_crc: crc,
+                    caps: caps.clone(),
+                },
+            );
+            caps
+        };
         let mut chosen: Option<(Requirement, Capability)> = None;
         for req in &self.reqs {
             for cap in &caps {
-                if matches(req, cap).is_ok() {
+                if matches_public(req, cap).is_ok() {
                     chosen = Some((req.clone(), cap.clone()));
                     break;
                 }
@@ -1121,6 +1640,7 @@ impl Device {
         let txn = self.next_txn();
         let mut sess = Session::new(f.src, Role::Consumer, now);
         sess.stage = Stage::HelloReceived;
+        sess.resumed = resumed;
         sess.txn = txn;
         sess.target = Some((cap.index, cap.sub));
         sess.requirement = Some(req.clone());
@@ -1398,12 +1918,16 @@ impl Device {
             out.push(self.trace("negotiate_reject", f.src, reason));
             return;
         }
-        let binding_id = (now as u32).wrapping_mul(31).wrapping_add(self.id as u32 + 1).max(1);
+        // 同一 peer/点在同一描述版本内复用 binding_id；重连只换 session_id（FR-028）。
+        let binding_id = self.binding_for(f.src, index, sub);
         let session_id = ((now as u64) << 20) ^ ((self.id as u64) << 8) ^ 0x51ED_0001;
+        // 每次绑定换发新授权纪元：重连只复用描述缓存与绑定号，权限必须重新确认。
+        self.grant_epoch = self.grant_epoch.wrapping_add(1).max(1);
+        let grant_epoch = self.grant_epoch;
         let contract = Contract {
             binding_id,
             session_id,
-            grant_epoch: 1,
+            grant_epoch,
             owner_token: 0,
             ttl_ms: DEFAULT_TTL_MS,
             t_pub_ms: t_pub,
@@ -1433,7 +1957,9 @@ impl Device {
         w.field_u32(tlv_type::ARB, DEFAULT_ARB);
         w.field_u32(tlv_type::BIND_ID, binding_id);
         w.field_u64(tlv_type::SESSION_ID, session_id);
-        w.field_u64(tlv_type::GRANT_EPOCH, 1);
+        w.field_u64(tlv_type::GRANT_EPOCH, grant_epoch);
+        w.field_u32(tlv_type::DESC_VER, self.desc_version);
+        w.field_u32(tlv_type::DESC_CRC, self.desc_crc);
         w.field_u8(tlv_type::PERM, cap.perm);
         w.field_str(tlv_type::UNIT, &cap.unit);
         w.field_u8(tlv_type::DTYPE, cap.dtype);
@@ -1458,6 +1984,21 @@ impl Device {
                 self.fail_session(f.src, code, out);
                 return;
             }
+            // FR-006：授权视图必须与公共视图同 desc_version / 同完整性摘要。
+            let ver = get_u32(&tlvs, tlv_type::DESC_VER);
+            let crc = get_u32(&tlvs, tlv_type::DESC_CRC);
+            if let Some(cache) = self.desc_cache.get(&f.src).cloned() {
+                if ver != Some(cache.desc_version) || crc != Some(cache.desc_crc) {
+                    self.counters.binds_fail += 1;
+                    out.push(self.trace(
+                        "auth_reject",
+                        f.src,
+                        "授权视图与公共描述视图版本/摘要不一致 → 拒绝进入 BIND".to_string(),
+                    ));
+                    self.fail_session(f.src, ErrCode::State, out);
+                    return;
+                }
+            }
             let Some(sess) = self.sessions.get(&f.src).cloned() else {
                 return;
             };
@@ -1470,6 +2011,14 @@ impl Device {
             w.field_u32(tlv_type::TTL, contract.ttl_ms);
             w.field_u32(tlv_type::OWNER, 0);
             w.put_u16(contract.index, contract.sub, tlv_type::INDEX, contract.index);
+            // 断链重连时声明旧绑定/旧会话，供提供方校验并复用绑定号；实际会话仍是新 session_id。
+            if let Some(old) = self.bindings.get(&(f.src, contract.index, contract.sub)).cloned() {
+                if old.binding_id != 0 && old.session_id != 0 && old.session_id != contract.session_id {
+                    w.field_u32(tlv_type::OLD_BINDING, old.binding_id);
+                    w.field_u64(tlv_type::OLD_SESSION, old.session_id);
+                    w.field_u64(tlv_type::OLD_GRANT, old.grant_epoch);
+                }
+            }
             if let Some(s) = self.sessions.get_mut(&f.src) {
                 s.stage = Stage::Binding;
                 s.txn = txn;
@@ -1521,6 +2070,8 @@ impl Device {
         let mut w = TlvWriter::new();
         w.field_u8(tlv_type::RESULT, code as u8);
         w.field_u64(tlv_type::SESSION_ID, session_id);
+        w.field_u32(tlv_type::DESC_VER, self.desc_version);
+        w.field_u32(tlv_type::DESC_CRC, self.desc_crc);
         out.push(self.frame(now, ftype::AUTH, f.src, f.txn, w.finish()));
     }
 
@@ -1548,11 +2099,20 @@ impl Device {
                     if token != 0 {
                         contract.owner_token = token;
                     }
+                    let resumed = get_u8(&tlvs, tlv_type::RESUMED) == Some(1);
                     if let Some(s) = self.sessions.get_mut(&f.src) {
                         s.contract = Some(contract.clone());
                         s.owner_token = contract.owner_token;
                         s.stage = Stage::BindingPrepared;
                         s.bind_phase = phase;
+                        s.resumed = resumed;
+                    }
+                    if resumed {
+                        out.push(self.trace(
+                            "resume_ok",
+                            f.src,
+                            format!("提供方确认复用绑定 0x{:08X}，已换发新 owner_token=0x{:08X}", contract.binding_id, contract.owner_token),
+                        ));
                     }
                     let txn = self.next_txn();
                     let mut w = TlvWriter::new();
@@ -1574,6 +2134,26 @@ impl Device {
                 }
                 bind_phase::COMMITTED => {
                     let (index, sub) = sess.target.unwrap_or((0, 0));
+                    // 记录本次成功绑定的 binding_id/session_id，供下次断链重连校验与复用。
+                    if let Some(contract) = sess.contract.clone() {
+                        let (ver, crc) = self
+                            .desc_cache
+                            .get(&f.src)
+                            .map(|d| (d.desc_version, d.desc_crc))
+                            .unwrap_or((self.desc_version, 0));
+                        self.bindings.insert(
+                            (f.src, index, sub),
+                            BindingCache {
+                                binding_id: contract.binding_id,
+                                desc_version: ver,
+                                desc_crc: crc,
+                                session_id: contract.session_id,
+                                grant_epoch: contract.grant_epoch,
+                                index,
+                                sub,
+                            },
+                        );
+                    }
                     if let Some(s) = self.sessions.get_mut(&f.src) {
                         s.stage = Stage::Active;
                         s.bind_phase = phase;
@@ -1611,10 +2191,30 @@ impl Device {
             .find(|t| t.typ == tlv_type::INDEX)
             .map(|t| t.sub)
             .unwrap_or(0);
-        let bind_id = get_u32(&tlvs, tlv_type::BIND_ID).unwrap_or(0);
+        let bind_id = self.binding_for(f.src, index, sub);
         let session_id = get_u64(&tlvs, tlv_type::SESSION_ID).unwrap_or(0);
+        let old_binding = get_u32(&tlvs, tlv_type::OLD_BINDING).unwrap_or(0);
+        let old_session = get_u64(&tlvs, tlv_type::OLD_SESSION).unwrap_or(0);
+        let old_grant = get_u64(&tlvs, tlv_type::OLD_GRANT).unwrap_or(0);
         let requested_ttl = get_u32(&tlvs, tlv_type::TTL).unwrap_or(DEFAULT_TTL_MS);
         let owner_token = get_u32(&tlvs, tlv_type::OWNER).unwrap_or(0);
+        // FR-028：旧 binding_id + 旧 session_id 都匹配、且描述版本未变，才认定“重连复用”。
+        // 即使复用，下面也会换发新 owner_token，旧 token 绝不恢复。
+        let resumed = old_session != 0
+            && old_session != session_id
+            && (old_grant == 0 || old_grant < self.grant_epoch)
+            && self
+                .bindings
+                .get(&(f.src, index, sub))
+                .map(|b| {
+                    b.binding_id == old_binding
+                        && b.session_id == old_session
+                        && b.desc_version == self.desc_version
+                })
+                .unwrap_or(false);
+        if resumed {
+            self.counters.resumes_ok += 1;
+        }
         match phase {
             bind_phase::PREPARE => {
                 if let Some(existing) = self.owner.clone() {
@@ -1635,7 +2235,7 @@ impl Device {
                             self.counters.binds_fail += 1;
                             self.send_bind_result(
                                 now, f.src, f.txn, bind_phase::ABORT, bind_id, session_id, 0,
-                                ErrCode::Lease, out,
+                                ErrCode::Lease, false, out,
                             );
                             out.push(self.trace("bind_reject", f.src, "写租约被占用 → E_LEASE".to_string()));
                         }
@@ -1664,7 +2264,7 @@ impl Device {
                 }
                 self.send_bind_result(
                     now, f.src, f.txn, bind_phase::PREPARED, bind_id, session_id, token,
-                    ErrCode::Ok, out,
+                    ErrCode::Ok, resumed, out,
                 );
                 out.push(self.trace(
                     "bind_prepare",
@@ -1682,7 +2282,7 @@ impl Device {
                     self.counters.binds_fail += 1;
                     self.send_bind_result(
                         now, f.src, f.txn, bind_phase::ABORT, bind_id, session_id, 0,
-                        ErrCode::Lease, out,
+                        ErrCode::Lease, false, out,
                     );
                     return;
                 }
@@ -1694,10 +2294,19 @@ impl Device {
                     s.bind_phase = bind_phase::COMMITTED;
                     s.last_rx_ms = now;
                 }
+                // 只有到 COMMIT 才登记新 session_id：旧会话号从此失效，但绑定号保持稳定。
+                let entry = self.bindings.entry((f.src, index, sub)).or_default();
+                entry.binding_id = bind_id;
+                entry.session_id = session_id;
+                entry.grant_epoch = self.grant_epoch;
+                entry.desc_version = self.desc_version;
+                entry.desc_crc = self.desc_crc;
+                entry.index = index;
+                entry.sub = sub;
                 self.counters.binds_ok += 1;
                 self.send_bind_result(
                     now, f.src, f.txn, bind_phase::COMMITTED, bind_id, session_id, owner_token,
-                    ErrCode::Ok, out,
+                    ErrCode::Ok, resumed, out,
                 );
                 out.push(self.trace("active", f.src, "两阶段绑定完成，进入 ACTIVE".to_string()));
             }
@@ -1712,7 +2321,7 @@ impl Device {
                 }
                 self.send_bind_result(
                     now, f.src, f.txn, bind_phase::COMMITTED, bind_id, session_id, 0,
-                    ErrCode::Ok, out,
+                    ErrCode::Ok, false, out,
                 );
                 out.push(self.trace("release", f.src, "旧 owner 已释放写租约".to_string()));
                 if let Some(pending) = self.pending_preempt.take() {
@@ -1748,7 +2357,7 @@ impl Device {
         }
         self.send_bind_result(
             now, peer, sess.txn, bind_phase::PREPARED, contract.binding_id, contract.session_id,
-            token, ErrCode::Ok, out,
+            token, ErrCode::Ok, false, out,
         );
         out.push(self.trace("preempt_grant", peer, "旧 owner 释放，写租约转交新 owner".to_string()));
     }
@@ -1764,6 +2373,7 @@ impl Device {
         session_id: u64,
         token: u32,
         code: ErrCode,
+        resumed: bool,
         out: &mut Vec<Action>,
     ) {
         let mut w = TlvWriter::new();
@@ -1772,6 +2382,9 @@ impl Device {
         w.field_u64(tlv_type::SESSION_ID, session_id);
         w.field_u32(tlv_type::OWNER, token);
         w.field_u8(tlv_type::RESULT, code as u8);
+        if resumed {
+            w.field_u8(tlv_type::RESUMED, 1);
+        }
         if code != ErrCode::Ok {
             w.field_u8(err_field::CODE, code as u8);
             w.field_str(err_field::REASON, code.name());
@@ -2410,6 +3023,19 @@ impl Device {
             .and_then(|t| t.as_str())
             .unwrap_or("")
             .to_string();
+        // 请求级错误（错误体带被拒项）只影响本次操作，不拆会话；
+        // 例如 CONFIG 因 E_PERM 被拒后，既有绑定契约仍应继续有效（FR-065）。
+        if tlvs.iter().any(|t| t.typ == err_field::INDEX) {
+            if let Some(s) = self.sessions.get_mut(&f.src) {
+                s.error = Some(code);
+            }
+            out.push(self.trace(
+                "error_rejected",
+                f.src,
+                format!("请求被拒（{}）：{}", code.name(), reason),
+            ));
+            return;
+        }
         if let Some(s) = self.sessions.get_mut(&f.src) {
             s.error = Some(code);
             s.stage = Stage::Failed;

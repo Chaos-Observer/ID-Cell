@@ -1,0 +1,27 @@
+{
+  "name": "组播：可靠组播应答与缺席判据（FR-070）",
+  "duration_ms": 3200,
+  "seed": 21,
+  "key": "idcell-lab-key",
+  "link": { "delay_ms": 1, "media": "ethernet", "topology": "p2p", "t_link_min_ms": 1 },
+  "devices": [
+    { "name": "gw", "did": "00000000-00000041", "group": 7 },
+    { "name": "m1", "did": "00000000-00000042", "group": 7 },
+    { "name": "m2", "did": "00000000-00000043", "group": 7 },
+    { "name": "m3", "did": "00000000-00000044", "group": 7 },
+    { "name": "outsider", "did": "00000000-00000045", "group": 9 }
+  ],
+  "faults": [
+    { "at_ms": 100, "kind": "partition", "a": "gw", "b": "m3" },
+    { "at_ms": 300, "kind": "group_declare", "device": "gw", "group_id": 7, "expected": "m1,m2", "response_mode": "required", "response_timeout_ms": 500, "group_epoch": 1 },
+    { "at_ms": 900, "kind": "group_declare", "device": "gw", "group_id": 7, "expected": "m1,m2,m3", "response_mode": "required", "response_timeout_ms": 500, "group_epoch": 1 },
+    { "at_ms": 1500, "kind": "group_declare", "device": "gw", "group_id": 7, "expected": "m1,m2", "response_mode": "required", "response_timeout_ms": 500, "group_epoch": 0 },
+    { "at_ms": 1700, "kind": "group_declare", "device": "gw", "group_id": 7, "response_mode": "none" }
+  ],
+  "asserts": [
+    { "kind": "group_ok", "op": ">=", "value": 1, "description": "全员应答的可靠组播判定成功" },
+    { "kind": "group_missing", "op": ">=", "value": 1, "description": "分区成员缺席被判出" },
+    { "kind": "group_rejects", "op": ">=", "value": 1, "description": "缺少 group_epoch 的可靠组播被拒绝" },
+    { "kind": "frame", "frame": "GROUP", "op": ">=", "value": 4, "description": "组声明与成员应答均上链" }
+  ]
+}

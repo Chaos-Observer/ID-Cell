@@ -285,7 +285,8 @@ function render(data) {
     ["抖动 σ", (m.jitter_ms ?? 0).toFixed(2) + "ms"],
     ["吞吐", (m.throughput_kbps ?? 0).toFixed(2) + " kbps"],
     ["绑定成功", sum("binds_ok")], ["绑定失败", sum("binds_fail")],
-    ["过期事件", sum("stale_events")], ["写拒绝", sum("writes_rejected")],
+    ["重连复用", sum("resumes_ok")], ["组播完成", sum("group_ok")], ["组播缺席", sum("group_missing")],
+    ["配置拒绝", sum("config_rejects")], ["过期事件", sum("stale_events")], ["写拒绝", sum("writes_rejected")],
     ["查询", sum("queries_sent")], ["应答", sum("replies_rx")]
   ];
   document.getElementById("stats").innerHTML = stats.map(([k, v]) =>

@@ -133,6 +133,12 @@ pub mod tlv_type {
     pub const AUTHORITY_ID: u8 = 0x44;
     pub const AUTHORITY_EPOCH: u8 = 0x45;
     pub const MEMBER_EPOCH: u8 = 0x46;
+    /// 重连复用的旧绑定号（请与 `idcell_internal.h` 的 OLD_BINDING 对齐）。
+    pub const OLD_BINDING: u8 = 0x49;
+    /// 重连复用的旧会话号：仅用于校验，实际写入会话 MUST 使用新 session_id。
+    pub const OLD_SESSION: u8 = 0x4A;
+    /// 重连复用的旧授权纪元（只读校验，不恢复旧权限）。
+    pub const OLD_GRANT: u8 = 0x4B;
     pub const MESSAGE: u8 = 0x4C;
     pub const ROLE: u8 = 0x4D;
     pub const ORIGINATOR: u8 = 0x4E;
@@ -156,6 +162,20 @@ pub mod tlv_type {
     pub const QUERY_MODE: u8 = 0x5E;
     /// 应答中的能力点标签，便于发起方在无契约时展示。
     pub const LABEL: u8 = 0x5F;
+    /// 实验室扩展：HELLO 命中公共描述缓存（1=复用缓存，未携带 CAP_DESC）。
+    pub const RESUMED: u8 = 0x60;
+    /// 组播组号（u16/u32 大端）。
+    pub const GROUP_ID: u8 = 0x7A;
+    /// 组声明响应模式：0=不要求响应，1=要求响应（可靠组播）。
+    pub const RESPONSE_MODE: u8 = 0x7B;
+    /// 组声明响应超时（ms）。
+    pub const RESPONSE_TIMEOUT: u8 = 0x7C;
+    /// 组声明期望成员数（可靠组播缺少即拒绝）。
+    pub const EXPECTED_MEMBERS: u8 = 0x7D;
+    /// 组成员关系纪元（可靠组播缺少即拒绝）。
+    pub const GROUP_EPOCH: u8 = 0x7E;
+    /// 组缺席成员数（发送方超时后本地判定）。
+    pub const MISSING_MEMBERS: u8 = 0x7F;
     /// 与描述符字段同码，用于契约协商中的值类型/缩放。
     pub const DTYPE: u8 = 0x55;
     pub const SCALE: u8 = 0x56;
@@ -227,6 +247,25 @@ pub mod bind_phase {
     pub const ABORT: u8 = 5;
     pub const RELEASE: u8 = 6;
 }
+
+/// GROUP 帧语义（FR-070）：组声明、成员应答。
+pub mod group_phase {
+    /// 组播声明；可靠组播必须携带 group_epoch 与 expected_members。
+    pub const DECLARE: u8 = 1;
+    /// 成员应答（仅可靠组播要求）。
+    pub const REPORT: u8 = 2;
+}
+
+/// 组播响应模式。
+pub mod response_mode {
+    /// 广播/普通组播：不要求响应，不承诺送达。
+    pub const NONE: u8 = 0;
+    /// 可靠组播：要求成员在 response_timeout 内应答。
+    pub const REQUIRED: u8 = 1;
+}
+
+/// CONFIG 配置项的最低访问等级（FR-065）：配置项至少需要 P2。
+pub const CONFIG_MIN_PERM: u8 = 2;
 
 // 发现消息语义
 pub const DISCOVER_ANNOUNCE: u8 = 1;

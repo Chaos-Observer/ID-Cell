@@ -378,7 +378,7 @@ impl World {
 
     fn route(&mut self, from: usize, to: Did, frame: Frame) {
         let targets: Vec<usize> = if to.is_broadcast() {
-            self.broadcast_targets(from, None, frame.group)
+            self.broadcast_targets(from, None, frame.group, frame.frame_type == ftype::GROUP)
         } else {
             match self.did_map.get(&to) {
                 Some(i) if *i != from => vec![*i],
@@ -442,14 +442,28 @@ impl World {
     }
 
     /// 广播目标：除自己、可选排除上一跳之外，同组且满足连线约束的设备。
-    fn broadcast_targets(&self, from: usize, exclude: Option<usize>, group: u16) -> Vec<usize> {
+    ///
+    /// `strict_group=true` 仅用于 GROUP 帧：组播必须精确投递给 group_id 成员，
+    /// 组外设备（含未分组设备）不得收到（FR-070）。
+    fn broadcast_targets(
+        &self,
+        from: usize,
+        exclude: Option<usize>,
+        group: u16,
+        strict_group: bool,
+    ) -> Vec<usize> {
         self.devices
             .iter()
             .enumerate()
             .filter(|(i, d)| {
+                let in_group = if strict_group {
+                    d.group == group
+                } else {
+                    group == 0 || d.group == group || d.group == 0
+                };
                 *i != from
                     && Some(*i) != exclude
-                    && (group == 0 || d.group == group || d.group == 0)
+                    && in_group
                     && (!self.require_link || self.link_index(from, *i).is_some())
             })
             .map(|(i, _)| i)
@@ -846,7 +860,8 @@ impl World {
 
         let mut nf = frame.clone();
         nf.payload = payload;
-        let targets = self.broadcast_targets(node, prev, nf.group);
+        let targets =
+            self.broadcast_targets(node, prev, nf.group, nf.frame_type == ftype::GROUP);
         if targets.is_empty() {
             return;
         }
@@ -1102,6 +1117,55 @@ impl World {
         true
     }
 
+    /// 发起可靠/普通组播声明（FR-070）。
+    pub fn request_group_declare(
+        &mut self,
+        device: &str,
+        gid: u16,
+        expected: &[&str],
+        timeout_ms: u32,
+        mode: u8,
+        epoch: u32,
+    ) -> bool {
+        if self.finished {
+            return false;
+        }
+        let Some(di) = self.resolve(device) else {
+            return false;
+        };
+        let mut members = Vec::new();
+        for name in expected {
+            let Some(mi) = self.resolve(name) else {
+                return false;
+            };
+            members.push(self.devices[mi].did);
+        }
+        let actions =
+            self.devices[di].request_group_declare(self.now_ms, gid, members, timeout_ms, mode, epoch);
+        self.apply_actions(di, actions);
+        true
+    }
+
+    /// 发起 CONFIG 配置项修改（FR-065）。
+    pub fn request_config(
+        &mut self,
+        device: &str,
+        peer: &str,
+        index: u16,
+        sub: u8,
+        new_perm: u8,
+        intent: &str,
+    ) -> bool {
+        let (Some(ci), Some(pi)) = (self.resolve(device), self.resolve(peer)) else {
+            return false;
+        };
+        let peer_did = self.devices[pi].did;
+        let actions =
+            self.devices[ci].request_config(self.now_ms, peer_did, index, sub, new_perm, intent);
+        self.apply_actions(ci, actions);
+        true
+    }
+
     /// 发起查询（Zenoh 风格）：默认广播，`peer` 非空时定向到单个提供者。
     pub fn request_query(
         &mut self,
@@ -1162,6 +1226,41 @@ impl World {
 
     pub fn total_binds_fail(&self) -> u64 {
         self.devices.iter().map(|d| d.counters.binds_fail).sum()
+    }
+
+    pub fn total_resumes_ok(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.resumes_ok).sum()
+    }
+
+    pub fn total_group_ok(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.group_ok).sum()
+    }
+
+    pub fn total_group_missing(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.group_missing).sum()
+    }
+
+    pub fn total_group_rejects(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.group_rejects).sum()
+    }
+
+    pub fn total_config_ok(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.config_ok).sum()
+    }
+
+    pub fn total_config_rejects(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.config_rejects).sum()
+    }
+
+    /// 某设备对 peer 的会话是否走了描述缓存复用路径（FR-028）。
+    pub fn session_resumed(&self, device: &str, peer: &str) -> bool {
+        let Some(d) = self.device(device) else {
+            return false;
+        };
+        let Some(p) = self.device(peer) else {
+            return false;
+        };
+        d.sessions.get(&p.did).map(|s| s.resumed).unwrap_or(false)
     }
 
     pub fn total_stale_events(&self) -> u64 {
@@ -1248,6 +1347,7 @@ impl World {
                     stage: s.stage.name(),
                     t_pub_ms: s.contract.as_ref().map(|c| c.t_pub_ms).unwrap_or(0),
                     stale: s.stale,
+                    resumed: s.resumed,
                     error: s.error.map(|e| e.name().to_string()),
                 })
                 .collect();
@@ -1399,6 +1499,8 @@ pub struct SessionView {
     pub stage: &'static str,
     pub t_pub_ms: u32,
     pub stale: bool,
+    /// 是否经描述缓存复用恢复（FR-028）。
+    pub resumed: bool,
     pub error: Option<String>,
 }
 
@@ -1602,12 +1704,13 @@ impl Snapshot {
                     s.push(',');
                 }
                 s.push_str(&format!(
-                    "{{\"peer\":\"{}\",\"role\":\"{}\",\"stage\":\"{}\",\"t_pub_ms\":{},\"stale\":{},\"error\":{}}}",
+                    "{{\"peer\":\"{}\",\"role\":\"{}\",\"stage\":\"{}\",\"t_pub_ms\":{},\"stale\":{},\"resumed\":{},\"error\":{}}}",
                     json_escape(&sess.peer),
                     sess.role,
                     sess.stage,
                     sess.t_pub_ms,
                     sess.stale,
+                    sess.resumed,
                     match &sess.error {
                         Some(e) => format!("\"{}\"", json_escape(e)),
                         None => "null".into(),
@@ -1636,7 +1739,7 @@ impl Snapshot {
             }
             s.push_str("],\"counters\":{");
             s.push_str(&format!(
-                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"logic_fired\":{}",
+                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"logic_fired\":{}",
                 d.counters.tx,
                 d.counters.rx,
                 d.counters.binds_ok,
@@ -1653,6 +1756,13 @@ impl Snapshot {
                 d.counters.queries_answered,
                 d.counters.query_timeouts,
                 d.counters.proto_rejects,
+                d.counters.resumes_ok,
+                d.counters.group_rounds,
+                d.counters.group_ok,
+                d.counters.group_missing,
+                d.counters.group_rejects,
+                d.counters.config_ok,
+                d.counters.config_rejects,
                 d.counters.logic_fired
             ));
             s.push_str("},\"queries\":[");

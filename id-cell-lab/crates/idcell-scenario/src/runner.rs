@@ -32,7 +32,7 @@ impl RunOutcome {
         }
         let m = &self.snapshot.metrics;
         s.push_str(&format!(
-            "],\"metrics\":{{\"frames_tx\":{},\"frames_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"binds_ok\":{},\"binds_fail\":{},\"stale_events\":{},\"timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{}}}}}",
+            "],\"metrics\":{{\"frames_tx\":{},\"frames_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"binds_ok\":{},\"binds_fail\":{},\"resumes_ok\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"stale_events\":{},\"timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{}}}}}",
             m.frames_tx,
             m.frames_rx,
             m.drops,
@@ -42,6 +42,12 @@ impl RunOutcome {
             m.latency_max_ms,
             bind_sum(&self.snapshot, |c| c.binds_ok),
             bind_sum(&self.snapshot, |c| c.binds_fail),
+            bind_sum(&self.snapshot, |c| c.resumes_ok),
+            bind_sum(&self.snapshot, |c| c.group_ok),
+            bind_sum(&self.snapshot, |c| c.group_missing),
+            bind_sum(&self.snapshot, |c| c.group_rejects),
+            bind_sum(&self.snapshot, |c| c.config_ok),
+            bind_sum(&self.snapshot, |c| c.config_rejects),
             bind_sum(&self.snapshot, |c| c.stale_events),
             bind_sum(&self.snapshot, |c| c.session_timeouts),
             bind_sum(&self.snapshot, |c| c.writes_ok),
@@ -90,6 +96,30 @@ pub fn apply_fault(world: &mut World, f: &FaultDef) -> Result<(), String> {
             &f.selector,
             f.mode,
             f.hop_limit,
+        ),
+        "group_declare" => {
+            let members: Vec<&str> = f
+                .expected
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            world.request_group_declare(
+                &f.device,
+                f.group_id,
+                &members,
+                f.response_timeout_ms,
+                f.response_mode,
+                f.group_epoch,
+            )
+        }
+        "config" => world.request_config(
+            &f.device,
+            &f.peer,
+            f.index,
+            f.sub,
+            f.value as u8,
+            &f.intent,
         ),
         "raw_frame" => {
             world.inject_raw_frame(&f.device, &f.peer, f.frame_type, f.flags)

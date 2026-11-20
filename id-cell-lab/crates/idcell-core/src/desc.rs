@@ -337,6 +337,23 @@ impl Requirement {
 
 /// 匹配判定：量种/单位/读写方向/权限/量程/值类型全部满足才算候选。
 pub fn matches(requirement: &Requirement, cap: &Capability) -> Result<(), crate::errors::ErrCode> {
+    matches_impl(requirement, cap, true)
+}
+
+/// 公共描述视图匹配：公共视图不含 perm，权限位由提供方在 MATCH/NEGOTIATE 复核，
+/// 消费方不得据此自行判定权限（否则 P2/P3 需求会永远无法匹配）。
+pub fn matches_public(
+    requirement: &Requirement,
+    cap: &Capability,
+) -> Result<(), crate::errors::ErrCode> {
+    matches_impl(requirement, cap, false)
+}
+
+fn matches_impl(
+    requirement: &Requirement,
+    cap: &Capability,
+    check_perm: bool,
+) -> Result<(), crate::errors::ErrCode> {
     use crate::errors::ErrCode;
     if requirement.qty != cap.qty {
         return Err(ErrCode::NoMatch);
@@ -344,7 +361,7 @@ pub fn matches(requirement: &Requirement, cap: &Capability) -> Result<(), crate:
     if !cap.readable() {
         return Err(ErrCode::NoMatch);
     }
-    if requirement.perm > cap.perm {
+    if check_perm && requirement.perm > cap.perm {
         return Err(ErrCode::Perm);
     }
     let unit_ok = cap.unit == requirement.unit

@@ -431,6 +431,12 @@ pub struct FaultDef {
     /// raw_frame 故障：原始帧类型与标志位
     pub frame_type: u8,
     pub flags: u8,
+    /// group_declare 故障：组号、期望成员（逗号分隔）、响应超时与成员纪元
+    pub group_id: u16,
+    pub expected: String,
+    pub response_timeout_ms: u32,
+    pub group_epoch: u32,
+    pub response_mode: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -784,6 +790,18 @@ fn parse_fault(v: &Json) -> Result<FaultDef, String> {
             .or_else(|| v.u64_field("ftype"))
             .unwrap_or(0) as u8,
         flags: v.u64_field("flags").unwrap_or(0) as u8,
+        group_id: v.u64_field("group_id").unwrap_or(0) as u16,
+        expected: v.str_field("expected").unwrap_or_default(),
+        response_timeout_ms: v.u64_field("response_timeout_ms").unwrap_or(1000) as u32,
+        group_epoch: v.u64_field("group_epoch").unwrap_or(1) as u32,
+        response_mode: match v.str_field("response_mode").as_deref() {
+            Some("none") => idcell_core::consts::response_mode::NONE,
+            Some("required") => idcell_core::consts::response_mode::REQUIRED,
+            _ => v
+                .u64_field("response_mode")
+                .unwrap_or(idcell_core::consts::response_mode::REQUIRED as u64)
+                as u8,
+        },
     })
 }
 
