@@ -92,6 +92,8 @@ fn counter(world: &World, kind: &str) -> Option<u64> {
         "bus_busy_ms" => world.metrics.bus_busy_ms,
         "actuator_moves" => world.total_actuator_moves(),
         "state_changes" => world.total_state_changes(),
+        "alarms_raised" => world.total_alarms_raised(),
+        "alarms_cleared" => world.total_alarms_cleared(),
         "link_ack_tx" => world.total_link_ack_tx(),
         "dup_drops" => world.total_dup_drops(),
         "provision_sent" => world.total_provision_sent(),
@@ -170,6 +172,14 @@ pub fn evaluate_one(world: &World, def: &AssertDef) -> AssertResult {
             let need = if def.value > 0.0 { def.value } else { 1.0 };
             result.passed = ok >= need;
             result.detail = format!("binds_ok={ok}，期望 >= {need}");
+        }
+        "alarm" => {
+            let level = world.alarm_level(&def.device, def.index, def.sub) as f64;
+            result.passed = compare(&def.op, level, def.value, def.tolerance);
+            result.detail = format!(
+                "{} 点 ({},{}) 报警等级 {} {} {}",
+                def.device, def.index, def.sub, level, def.op, def.value
+            );
         }
         "value" => {
             let Some((v, stale, quality)) = world.received_value(&def.device, def.index, def.sub)

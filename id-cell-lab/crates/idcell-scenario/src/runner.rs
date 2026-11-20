@@ -149,6 +149,11 @@ pub fn apply_fault(world: &mut World, f: &FaultDef) -> Result<(), String> {
             &f.intent,
         ),
         "provision" => world.request_provision(&f.device, &f.peer, f.group_id, &f.intent),
+        "sensor_fault" | "sensor" => {
+            // mode: 1=卡值 2=失效 3=漂移(单位/秒) 4=跳变(偏移量)
+            world.set_sensor_fault(&f.device, f.index, f.sub, f.mode.max(1), f.value)
+        }
+        "sensor_clear" => world.clear_sensor_fault(&f.device, f.index, f.sub),
         "raw_frame" => {
             world.inject_raw_frame(&f.device, &f.peer, f.frame_type, f.flags)
         }

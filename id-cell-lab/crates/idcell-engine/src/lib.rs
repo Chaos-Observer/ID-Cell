@@ -7,9 +7,9 @@ pub mod trace;
 pub mod world;
 
 pub use device::{
-    ActState, Actuator, Action, Contract, Device, DeviceCounters, DeviceSpec, DeviceState, Lease,
-    LogicKind, LogicRule, LogicState, PointSim, QueryReply, QuerySession, ReceivedValue, Role,
-    RunMode, Session, Stage,
+    ActState, Actuator, Action, AlarmDef, AlarmState, Contract, Device, DeviceCounters, DeviceSpec,
+    DeviceState, Lease, LogicKind, LogicRule, LogicState, PointSim, QueryReply, QuerySession,
+    ReceivedValue, Role, RunMode, SensorFault, Session, Stage,
 };
 pub use link::{media_catalog_json, media_spec, Link, LinkConfig, MediaSpec, MEDIA_CATALOG};
 pub use rng::Rng;

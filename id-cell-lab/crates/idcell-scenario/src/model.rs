@@ -3,7 +3,7 @@
 use crate::json::{parse, Json};
 use idcell_core::{consts::qty, Did};
 use idcell_engine::{
-    DeviceSpec, LinkConfig, LogicKind, LogicRule, PointSim, RunMode, World, WorldConfig,
+    AlarmDef, DeviceSpec, LinkConfig, LogicKind, LogicRule, PointSim, RunMode, World, WorldConfig,
 };
 use std::collections::BTreeMap;
 
@@ -305,6 +305,19 @@ pub struct ActDef {
     pub initial: Option<f64>,
 }
 
+/// 点位报警：高高/高/低/低低阈值与死区、确认延时。
+#[derive(Debug, Clone)]
+pub struct AlarmSpec {
+    pub index: u16,
+    pub sub: u8,
+    pub hh: f64,
+    pub h: f64,
+    pub l: f64,
+    pub ll: f64,
+    pub deadband: f64,
+    pub delay_ms: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceDef {
     pub name: String,
@@ -328,6 +341,7 @@ pub struct DeviceDef {
     pub sims: Vec<SimDef>,
     pub logic: Vec<LogicDef>,
     pub actuators: Vec<ActDef>,
+    pub alarms: Vec<AlarmSpec>,
 }
 
 impl DeviceDef {
@@ -386,6 +400,18 @@ impl DeviceDef {
                     initial: a.initial,
                 },
             );
+        }
+        for a in &self.alarms {
+            spec.alarms.push(AlarmDef {
+                index: a.index,
+                sub: a.sub,
+                hh: a.hh,
+                h: a.h,
+                l: a.l,
+                ll: a.ll,
+                deadband: a.deadband,
+                delay_ms: a.delay_ms,
+            });
         }
         spec
     }
@@ -678,6 +704,25 @@ fn parse_device(v: &Json, index: usize) -> Result<DeviceDef, String> {
             });
         }
     }
+    let mut alarms = Vec::new();
+    if let Some(items) = v.array_field("alarms") {
+        for a in items {
+            let point = a
+                .str_field("point")
+                .and_then(|p| parse_point(&p))
+                .unwrap_or((1, 0));
+            alarms.push(AlarmSpec {
+                index: a.u64_field("index").unwrap_or(point.0 as u64) as u16,
+                sub: a.u64_field("sub").unwrap_or(point.1 as u64) as u8,
+                hh: a.f64_field("hh").unwrap_or(f64::INFINITY),
+                h: a.f64_field("h").unwrap_or(f64::INFINITY),
+                l: a.f64_field("l").unwrap_or(f64::NEG_INFINITY),
+                ll: a.f64_field("ll").unwrap_or(f64::NEG_INFINITY),
+                deadband: a.f64_field("deadband").unwrap_or(0.0),
+                delay_ms: a.u64_field("delay_ms").unwrap_or(0),
+            });
+        }
+    }
     Ok(DeviceDef {
         name,
         did: v.str_field("did").unwrap_or_else(|| format!("{:016X}", index as u64 + 1)),
@@ -699,6 +744,7 @@ fn parse_device(v: &Json, index: usize) -> Result<DeviceDef, String> {
         sims,
         logic,
         actuators,
+        alarms,
     })
 }
 
@@ -839,8 +885,10 @@ fn parse_fault(v: &Json) -> Result<FaultDef, String> {
         mode: match v.str_field("mode").as_deref() {
             Some("first") => idcell_core::consts::query_mode::FIRST,
             Some("all") => idcell_core::consts::query_mode::ALL,
+            // 数字 mode 同时服务查询模式与采集故障模式（1..4），缺省按查询 ALL。
             _ => v
-                .u64_field("query_mode")
+                .u64_field("mode")
+                .or_else(|| v.u64_field("query_mode"))
                 .unwrap_or(idcell_core::consts::query_mode::ALL as u64)
                 as u8,
         },

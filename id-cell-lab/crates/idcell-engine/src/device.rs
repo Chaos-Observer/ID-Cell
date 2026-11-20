@@ -362,6 +362,9 @@ pub struct DeviceCounters {
     pub actuator_moves: u64,
     /// 设备状态机迁移次数
     pub state_changes: u64,
+    /// 报警产生 / 复位次数
+    pub alarms_raised: u64,
+    pub alarms_cleared: u64,
     /// 入网完成次数（提供方受理 / 消费方应用各计一次）
     pub provision_ok: u64,
     /// 入网被拒（会话未 active、HMAC 失败、组号非法）
@@ -482,6 +485,59 @@ pub struct ActState {
     pub last_switch_ms: u64,
 }
 
+/// 采集通道故障注入：卡值、失效、漂移、跳变。
+#[derive(Debug, Clone)]
+pub struct SensorFault {
+    /// 1=卡值 2=失效 3=漂移 4=跳变
+    pub mode: u8,
+    /// 漂移速率（单位/秒）或跳变偏移量。
+    pub value: f64,
+    pub at_ms: u64,
+    pub last_ms: u64,
+    /// 漂移累计量。
+    pub acc: f64,
+}
+
+/// 点位报警定义：高高/高/低/低低 + 死区 + 判定延时。
+#[derive(Debug, Clone)]
+pub struct AlarmDef {
+    pub index: u16,
+    pub sub: u8,
+    pub hh: f64,
+    pub h: f64,
+    pub l: f64,
+    pub ll: f64,
+    /// 死区：回到阈值以内该幅度才复位，避免抖动。
+    pub deadband: f64,
+    /// 条件持续多久才确认报警（ms）。
+    pub delay_ms: u64,
+}
+
+impl Default for AlarmDef {
+    fn default() -> Self {
+        AlarmDef {
+            index: 1,
+            sub: 0,
+            hh: f64::INFINITY,
+            h: f64::INFINITY,
+            l: f64::NEG_INFINITY,
+            ll: f64::NEG_INFINITY,
+            deadband: 0.0,
+            delay_ms: 0,
+        }
+    }
+}
+
+/// 报警等级：0=正常 1=低低 2=低 3=高 4=高高。
+#[derive(Debug, Clone, Default)]
+pub struct AlarmState {
+    pub level: u8,
+    /// 候选等级与起始时刻（延时判定用）。
+    pub pending: u8,
+    pub pending_since: u64,
+    pub since_ms: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceSpec {
     pub name: String,
@@ -506,6 +562,8 @@ pub struct DeviceSpec {
     pub rules: Vec<LogicRule>,
     /// 执行器物理模型：按能力点索引。
     pub actuators: BTreeMap<(u16, u8), Actuator>,
+    /// 点位报警定义。
+    pub alarms: Vec<AlarmDef>,
 }
 
 impl DeviceSpec {
@@ -527,6 +585,7 @@ impl DeviceSpec {
             bus_master: false,
             rules: Vec::new(),
             actuators: BTreeMap::new(),
+            alarms: Vec::new(),
         }
     }
 }
@@ -600,6 +659,11 @@ pub struct Device {
     /// 执行器模型与当前运动状态。
     pub actuators: BTreeMap<(u16, u8), Actuator>,
     pub act_states: BTreeMap<(u16, u8), ActState>,
+    /// 采集通道故障注入。
+    pub sensor_faults: BTreeMap<(u16, u8), SensorFault>,
+    /// 报警定义与当前等级。
+    pub alarms: Vec<AlarmDef>,
+    pub alarm_states: BTreeMap<(u16, u8), AlarmState>,
     /// 应用层行为规则与运行状态（规则触发节流 / 上次输出）。
     pub rules: Vec<LogicRule>,
     pub logic_state: Vec<LogicState>,
@@ -698,6 +762,9 @@ impl Device {
             boot_ms: spec.boot_ms,
             actuators: spec.actuators,
             act_states: BTreeMap::new(),
+            sensor_faults: BTreeMap::new(),
+            alarms: spec.alarms,
+            alarm_states: BTreeMap::new(),
             logic_state: vec![LogicState::default(); spec.rules.len()],
             rules: spec.rules,
             queries: BTreeMap::new(),
@@ -1524,6 +1591,7 @@ impl Device {
         }
         self.update_actuators(now);
         self.update_simulated_points(now);
+        self.update_alarms(now);
         self.update_state(now);
         if self.awake && self.rx_on {
             self.maybe_discover(now, &mut out);
@@ -1696,6 +1764,138 @@ impl Device {
         self.update_state(now);
     }
 
+    /// 注入采集通道故障：1=卡值 2=失效 3=漂移(单位/秒) 4=跳变(偏移量)。
+    pub fn set_sensor_fault(&mut self, now: u64, index: u16, sub: u8, mode: u8, value: f64) {
+        self.sensor_faults.insert(
+            (index, sub),
+            SensorFault {
+                mode,
+                value,
+                at_ms: now,
+                last_ms: now,
+                acc: 0.0,
+            },
+        );
+        if let Some(p) = self.points.get_mut(&(index, sub)) {
+            if mode == 1 || mode == 2 || mode == 3 {
+                p.quality = if mode == 2 {
+                    quality::BAD
+                } else {
+                    quality::UNCERTAIN
+                };
+            }
+            p.ts_ms = now;
+        }
+    }
+
+    /// 清除采集通道故障，恢复质量位并重新叠加正常波形。
+    pub fn clear_sensor_fault(&mut self, now: u64, index: u16, sub: u8) {
+        if self.sensor_faults.remove(&(index, sub)).is_some() {
+            if let Some(p) = self.points.get_mut(&(index, sub)) {
+                p.quality = quality::GOOD;
+                p.ts_ms = now;
+            }
+        }
+    }
+
+    /// 点位当前报警等级：0=正常 1=低低 2=低 3=高 4=高高。
+    pub fn alarm_level(&self, index: u16, sub: u8) -> u8 {
+        self.alarm_states
+            .get(&(index, sub))
+            .map(|s| s.level)
+            .unwrap_or(0)
+    }
+
+    /// 报警判定：阈值 + 死区 + 持续时间确认。
+    fn update_alarms(&mut self, now: u64) {
+        let defs = self.alarms.clone();
+        for a in defs {
+            let key = (a.index, a.sub);
+            let Some(v) = self.points.get(&key).map(|p| p.value) else {
+                continue;
+            };
+            let st = self.alarm_states.entry(key).or_default();
+            let cur = st.level;
+            let target = if cur == 4 {
+                if v >= a.hh - a.deadband {
+                    4
+                } else if v >= a.h {
+                    3
+                } else if v <= a.ll {
+                    1
+                } else if v <= a.l {
+                    2
+                } else {
+                    0
+                }
+            } else if cur == 3 {
+                if v >= a.hh {
+                    4
+                } else if v >= a.h - a.deadband {
+                    3
+                } else if v <= a.ll {
+                    1
+                } else if v <= a.l {
+                    2
+                } else {
+                    0
+                }
+            } else if cur == 2 {
+                if v >= a.hh {
+                    4
+                } else if v >= a.h {
+                    3
+                } else if v <= a.ll {
+                    1
+                } else if v <= a.l + a.deadband {
+                    2
+                } else {
+                    0
+                }
+            } else if cur == 1 {
+                if v >= a.hh {
+                    4
+                } else if v >= a.h {
+                    3
+                } else if v <= a.ll + a.deadband {
+                    1
+                } else if v <= a.l {
+                    2
+                } else {
+                    0
+                }
+            } else if v >= a.hh {
+                4
+            } else if v >= a.h {
+                3
+            } else if v <= a.ll {
+                1
+            } else if v <= a.l {
+                2
+            } else {
+                0
+            };
+            if target == cur {
+                st.pending = cur;
+                st.pending_since = now;
+                continue;
+            }
+            if st.pending != target {
+                st.pending = target;
+                st.pending_since = now;
+            }
+            if now.saturating_sub(st.pending_since) >= a.delay_ms {
+                st.level = target;
+                st.since_ms = now;
+                if target == 0 {
+                    self.counters.alarms_cleared += 1;
+                } else {
+                    self.counters.alarms_raised += 1;
+                }
+            }
+        }
+    }
+
     fn update_simulated_points(&mut self, now: u64) {
         // 可写点代表执行器保持值：不叠加波形，但持续刷新时标，避免被误判为过期。
         let writable: Vec<(u16, u8)> = self
@@ -1725,11 +1925,48 @@ impl Device {
             let period = sim.period_ms.max(1) as f64;
             let w = std::f64::consts::TAU * (now as f64 / period) + sim.phase;
             let noise = sim.noise * hash_noise(sim.seed, now);
-            let v = sim.base + sim.amplitude * w.sin() + noise;
+            let mut v = sim.base + sim.amplitude * w.sin() + noise;
+            let mut q = quality::GOOD;
+            // 采集通道故障：卡值/失效/漂移/跳变，让质量位与数值一起退化。
+            if let Some(f) = self.sensor_faults.get(&key) {
+                match f.mode {
+                    1 => {
+                        // 卡值：停止更新，保持故障发生瞬间的值。
+                        q = quality::UNCERTAIN;
+                        if let Some(p) = self.points.get_mut(&key) {
+                            p.quality = q;
+                            p.ts_ms = now;
+                        }
+                        continue;
+                    }
+                    2 => {
+                        // 失效：保留最后值，质量置 BAD。
+                        q = quality::BAD;
+                    }
+                    3 => {
+                        // 漂移：按速率累加偏差。
+                        v += f.acc;
+                        q = quality::UNCERTAIN;
+                    }
+                    4 => {
+                        // 跳变：叠加固定偏移。
+                        v += f.value;
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(f) = self.sensor_faults.get_mut(&key) {
+                if f.mode == 3 {
+                    let dt = now.saturating_sub(f.last_ms) as f64 / 1000.0;
+                    f.acc += f.value * dt;
+                    f.last_ms = now;
+                }
+            }
             if let Some(p) = self.points.get_mut(&key) {
-                if (p.value - v).abs() > f64::EPSILON {
+                if (p.value - v).abs() > f64::EPSILON || p.quality != q {
                     p.value = v;
                     p.ts_ms = now;
+                    p.quality = q;
                 }
             }
         }
@@ -3485,6 +3722,7 @@ impl Device {
             p.quality = quality::GOOD;
         }
         self.counters.writes_ok += 1;
+        self.update_alarms(now);
         if let Some(o) = self.owner.as_mut() {
             o.expires_ms = now + DEFAULT_TTL_MS as u64;
         }

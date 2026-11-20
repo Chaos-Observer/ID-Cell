@@ -1226,6 +1226,71 @@ impl World {
         }
     }
 
+    /// 注入采集通道故障：1=卡值 2=失效 3=漂移(单位/秒) 4=跳变(偏移量)。
+    pub fn set_sensor_fault(
+        &mut self,
+        name: &str,
+        index: u16,
+        sub: u8,
+        mode: u8,
+        value: f64,
+    ) -> bool {
+        if let Some(i) = self.resolve(name) {
+            self.devices[i].set_sensor_fault(self.now_ms, index, sub, mode, value);
+            let label = match mode {
+                1 => "采集通道卡值",
+                2 => "采集通道失效",
+                3 => "采集通道漂移",
+                4 => "采集通道跳变",
+                _ => "采集通道故障",
+            };
+            self.trace.push(TraceEntry::new(
+                self.now_ms,
+                "sensor",
+                name,
+                "",
+                "",
+                format!("{label}（{index}.{sub}，参数 {value}）"),
+            ));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 清除采集通道故障。
+    pub fn clear_sensor_fault(&mut self, name: &str, index: u16, sub: u8) -> bool {
+        if let Some(i) = self.resolve(name) {
+            self.devices[i].clear_sensor_fault(self.now_ms, index, sub);
+            self.trace.push(TraceEntry::new(
+                self.now_ms,
+                "sensor",
+                name,
+                "",
+                "",
+                format!("采集通道恢复（{index}.{sub}）"),
+            ));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 查询设备点位当前报警等级（0=正常 1=低低 2=低 3=高 4=高高）。
+    pub fn alarm_level(&self, name: &str, index: u16, sub: u8) -> u8 {
+        self.resolve(name)
+            .map(|i| self.devices[i].alarm_level(index, sub))
+            .unwrap_or(0)
+    }
+
+    pub fn total_alarms_raised(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.alarms_raised).sum()
+    }
+
+    pub fn total_alarms_cleared(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.alarms_cleared).sum()
+    }
+
     pub fn request_read(&mut self, consumer: &str, provider: &str, index: u16, sub: u8) -> bool {
         let (Some(ci), Some(pi)) = (self.resolve(consumer), self.resolve(provider)) else {
             return false;
@@ -1828,6 +1893,19 @@ impl World {
                 relay: d.relay,
                 state: d.state.name(),
                 state_since: d.state_since,
+                alarms: {
+                    let mut list = Vec::new();
+                    for a in &d.alarms {
+                        let st = d.alarm_states.get(&(a.index, a.sub));
+                        list.push(AlarmView {
+                            index: a.index,
+                            sub: a.sub,
+                            level: st.map(|s| s.level).unwrap_or(0),
+                            since_ms: st.map(|s| s.since_ms).unwrap_or(0),
+                        });
+                    }
+                    list
+                },
                 sessions,
                 values,
                 queries,
@@ -1931,6 +2009,14 @@ pub struct QueryView {
 }
 
 #[derive(Debug, Clone)]
+pub struct AlarmView {
+    pub index: u16,
+    pub sub: u8,
+    pub level: u8,
+    pub since_ms: u64,
+}
+
+#[derive(Debug, Clone)]
 pub struct DeviceView {
     pub name: String,
     pub did: String,
@@ -1950,6 +2036,8 @@ pub struct DeviceView {
     /// 运行状态机：boot / ready / run / degraded / fault
     pub state: &'static str,
     pub state_since: u64,
+    /// 报警点位与当前等级。
+    pub alarms: Vec<AlarmView>,
     pub sessions: Vec<SessionView>,
     pub values: Vec<ValueView>,
     pub queries: Vec<QueryView>,
@@ -1978,8 +2066,7 @@ fn device_profile(d: &Device) -> &'static str {
 }
 
 #[derive(Debug, Clone)]
-pub struct LinkView {
-    pub a: String,
+pub struct LinkView {    pub a: String,
     pub b: String,
     pub media: String,
     pub topology: String,
@@ -2140,7 +2227,7 @@ impl Snapshot {
             }
             s.push_str("],\"counters\":{");
             s.push_str(&format!(
-                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"link_ack_tx\":{},\"dup_drops\":{},\"provision_sent\":{},\"provision_ok\":{},\"provision_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{},\"actuator_moves\":{},\"state_changes\":{}",
+                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"link_ack_tx\":{},\"dup_drops\":{},\"provision_sent\":{},\"provision_ok\":{},\"provision_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{},\"actuator_moves\":{},\"state_changes\":{},\"alarms_raised\":{},\"alarms_cleared\":{}",
                 d.counters.tx,
                 d.counters.rx,
                 d.counters.binds_ok,
@@ -2185,7 +2272,9 @@ impl Snapshot {
                 d.counters.desc_oversize,
                 d.counters.logic_fired,
                 d.counters.actuator_moves,
-                d.counters.state_changes
+                d.counters.state_changes,
+                d.counters.alarms_raised,
+                d.counters.alarms_cleared
             ));
             s.push_str("},\"queries\":[");
             for (j, q) in d.queries.iter().enumerate() {
@@ -2218,6 +2307,16 @@ impl Snapshot {
                 }
                 s.push(']');
                 s.push('}');
+            }
+            s.push_str("],\"alarms\":[");
+            for (k, a) in d.alarms.iter().enumerate() {
+                if k > 0 {
+                    s.push(',');
+                }
+                s.push_str(&format!(
+                    "{{\"index\":{},\"sub\":{},\"level\":{},\"since_ms\":{}}}",
+                    a.index, a.sub, a.level, a.since_ms
+                ));
             }
             s.push_str("]}");
         }
