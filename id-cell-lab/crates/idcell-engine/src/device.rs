@@ -2,7 +2,7 @@
 
 use idcell_core::consts::{
     bind_phase, err_field, ftype, group_phase, query_mode, quality, response_mode, tlv_type,
-    CONFIG_MIN_PERM, DISCOVER_PROBE, FLAG_COMPRESS, FLAG_ENCRYPT, ROLE_CAPABILITY,
+    CONFIG_MIN_PERM, DISCOVER_PROBE, FLAG_COMPRESS, FLAG_ENCRYPT, FLAG_NEEDACK, ROLE_CAPABILITY,
     ROLE_REQUIREMENT,
 };
 use idcell_core::desc::{matches, matches_public};
@@ -352,6 +352,16 @@ pub struct DeviceCounters {
     pub desc_crc_errors: u64,
     /// 描述符超出 8KB/256 点上限被明确拒绝（SEC-044）
     pub desc_oversize: u64,
+    /// 已发出的链路级 ACK（NFR-026）
+    pub link_ack_tx: u64,
+    /// 因链路重传导致的重复帧被去重丢弃的次数
+    pub dup_drops: u64,
+    /// 已发起的入网/配网请求（消费方）
+    pub provision_sent: u64,
+    /// 入网完成次数（提供方受理 / 消费方应用各计一次）
+    pub provision_ok: u64,
+    /// 入网被拒（会话未 active、HMAC 失败、组号非法）
+    pub provision_rejects: u64,
 }
 
 /// 单条查询应答（发起方聚合用）。
@@ -533,6 +543,11 @@ pub struct Device {
     pub pending_cmds: Vec<PendingCmd>,
     /// 命令编号计数器（COMMAND_ID）。
     pub next_cmd_id: u32,
+    /// 控制面重复帧去重表：`(对端, TXN, 类型, 分片号)` → 首次处理时刻。
+    /// 分片号参与键：同一 TXN 的多片 HELLO 是不同帧，不能被去重。
+    pub dup_seen: BTreeMap<(Did, u16, u8, u8), u64>,
+    /// 上一次处理该请求时的应答帧；重复请求只重放应答，不重复改变状态。
+    pub dup_reply: BTreeMap<(Did, u16, u8, u8), Vec<(Did, Frame)>>,
 }
 
 impl Device {
@@ -601,6 +616,8 @@ impl Device {
             group_epoch: 1,
             pending_cmds: Vec::new(),
             next_cmd_id: 1,
+            dup_seen: BTreeMap::new(),
+            dup_reply: BTreeMap::new(),
         }
     }
 
@@ -636,6 +653,13 @@ impl Device {
             .with_payload(payload);
         let mut frame = frame;
         frame.flags = flags;
+        // 控制面帧一律要求链路确认，供 NFR-026 的有界重传使用；业务数据面不强制。
+        if matches!(
+            ft,
+            ftype::HELLO | ftype::MATCH | ftype::NEGOTIATE | ftype::AUTH | ftype::BIND
+        ) {
+            frame.flags |= FLAG_NEEDACK;
+        }
         frame.prof = self.prof;
         Action::Send { to, frame }
     }
@@ -827,6 +851,50 @@ impl Device {
             "cmd_sent",
             peer,
             format!("命令 {cmd_id} 已下发（预计 {exec_ms} ms 完成）"),
+        ));
+        out
+    }
+
+    /// 入网/配网（PROVISION）：在已认证会话上申请加入指定组，受 HMAC 保护（SEC-025）。
+    pub fn request_provision(
+        &mut self,
+        now: u64,
+        peer: Did,
+        gid: u16,
+        intent: &str,
+    ) -> Vec<Action> {
+        let mut out = Vec::new();
+        let Some(sess) = self.sessions.get(&peer) else {
+            out.push(self.trace("provision_skip", peer, "会话不存在，无法入网"));
+            return out;
+        };
+        if sess.stage != Stage::Active {
+            out.push(self.trace("provision_skip", peer, "会话未处于 active，无法入网"));
+            return out;
+        }
+        let session_id = sess.contract.as_ref().map(|c| c.session_id).unwrap_or(0);
+        let txn = self.next_txn();
+        let nonce = make_nonce(self.did, now, txn);
+        let proof = auth_proof(&self.key, &nonce, session_id, self.did, peer);
+        let mut w = TlvWriter::new();
+        w.field_u16(tlv_type::GROUP_ID, gid);
+        w.field_str(tlv_type::INTENT, intent);
+        w.field_u64(tlv_type::SESSION_ID, session_id);
+        let _ = w.raw_put(0, 0, tlv_type::NONCE, &nonce);
+        let _ = w.raw_put(0, 0, tlv_type::AUTH_PROOF, &proof);
+        out.push(self.frame_flags(
+            now,
+            ftype::PROVISION,
+            peer,
+            txn,
+            w.finish(),
+            idcell_core::consts::FLAG_AUTH,
+        ));
+        self.counters.provision_sent += 1;
+        out.push(self.trace(
+            "provision_sent",
+            peer,
+            format!("申请入网并加入组 {gid}（{intent}）"),
         ));
         out
     }
@@ -1264,6 +1332,68 @@ impl Device {
                 ),
             ));
         }
+    }
+
+    /// 提供方受理入网/配网：会话必须 active，组号合法，且 HMAC 证明匹配（SEC-025）。
+    fn on_provision(&mut self, now: u64, f: &Frame, out: &mut Vec<Action>) {
+        if !matches!(self.mode, RunMode::Provider | RunMode::Both) {
+            return;
+        }
+        let Ok(tlvs) = decode_tlvs(&f.payload) else {
+            return;
+        };
+        let Some(sess) = self.sessions.get(&f.src).cloned() else {
+            self.counters.provision_rejects += 1;
+            out.push(self.trace("provision_reject", f.src, "无会话，拒绝入网".to_string()));
+            return;
+        };
+        if sess.stage != Stage::Active {
+            self.counters.provision_rejects += 1;
+            self.send_error(now, f.src, ErrCode::State, "入网要求会话处于 active", out);
+            return;
+        }
+        let session_id = sess.contract.as_ref().map(|c| c.session_id).unwrap_or(0);
+        let nonce = tlvs
+            .iter()
+            .find(|t| t.typ == tlv_type::NONCE)
+            .map(|t| t.value.clone())
+            .unwrap_or_default();
+        let got = tlvs
+            .iter()
+            .find(|t| t.typ == tlv_type::AUTH_PROOF)
+            .map(|t| t.value.clone())
+            .unwrap_or_default();
+        let ok = nonce.len() == 16
+            && got.len() == 16
+            && auth_proof(
+                &self.key,
+                &nonce[..16].try_into().unwrap(),
+                session_id,
+                f.src,
+                self.did,
+            ) == got[..16];
+        if !ok {
+            self.counters.provision_rejects += 1;
+            self.send_error(now, f.src, ErrCode::Perm, "入网 HMAC 校验失败", out);
+            return;
+        }
+        let gid = get_u16(&tlvs, tlv_type::GROUP_ID).unwrap_or(0);
+        if gid == 0 {
+            self.counters.provision_rejects += 1;
+            self.send_error(now, f.src, ErrCode::Perm, "入网组号非法", out);
+            return;
+        }
+        self.counters.provision_ok += 1;
+        let mut w = TlvWriter::new();
+        w.field_u8(tlv_type::RESULT, ErrCode::Ok as u8);
+        w.field_u16(tlv_type::GROUP_ID, gid);
+        w.field_u32(tlv_type::GROUP_EPOCH, self.group_epoch);
+        out.push(self.frame(now, ftype::ACK, f.src, f.txn, w.finish()));
+        out.push(self.trace(
+            "provision_accept",
+            f.src,
+            format!("允许入网并加入组 {gid}（epoch {}）", self.group_epoch),
+        ));
     }
 
     pub fn active_sessions(&self) -> impl Iterator<Item = &Session> {
@@ -1784,6 +1914,41 @@ impl Device {
             ));
             return out;
         }
+        // 链路级确认（NFR-026）：带 NEEDACK 的数据帧由接收方先回链路 ACK，与业务类型解耦。
+        if f.flags & FLAG_NEEDACK != 0 && f.frame_type != ftype::ACK {
+            let mut w = TlvWriter::new();
+            w.field_u8(tlv_type::LINK_ACK, 1);
+            out.push(self.frame(now, ftype::ACK, f.src, f.txn, w.finish()));
+            self.counters.link_ack_tx += 1;
+        }
+        // 链路重传会带来重复帧：控制面同一 (对端, TXN, 类型) 只处理一次，
+        // 重复请求仅重放上次应答，既不回退状态也不重复计数。
+        let mut dup_key = None;
+        if f.flags & FLAG_NEEDACK != 0 {
+            let frag = decode_tlvs(&f.payload)
+                .ok()
+                .and_then(|t| get_u8(&t, tlv_type::DESC_FRAG_IDX))
+                .unwrap_or(0);
+            let key = (peer, f.txn, f.frame_type, frag);
+            if let Some(t) = self.dup_seen.get(&key) {
+                if now.saturating_sub(*t) <= 3000 {
+                    self.counters.dup_drops += 1;
+                    if let Some(replies) = self.dup_reply.get(&key).cloned() {
+                        for (to, frame) in replies {
+                            out.push(Action::Send { to, frame });
+                        }
+                    }
+                    return out;
+                }
+            }
+            self.dup_seen.insert(key, now);
+            dup_key = Some(key);
+            if self.dup_seen.len() > 512 {
+                let cutoff = now.saturating_sub(5000);
+                self.dup_seen.retain(|_, t| *t >= cutoff);
+            }
+        }
+        let before = out.len();
         match f.frame_type {
             ftype::DISCOVER => self.on_discover(now, &f, &mut out),
             ftype::HELLO => self.on_hello(now, &f, &mut out),
@@ -1804,6 +1969,7 @@ impl Device {
             ftype::CONFIG => self.on_config(now, &f, &mut out),
             ftype::CMD => self.on_cmd(now, &f, &mut out),
             ftype::DONE => self.on_done(now, &f, &mut out),
+            ftype::PROVISION => self.on_provision(now, &f, &mut out),
             ftype::RENEGOTIATE => {
                 // 带 AUTH 标志的是 CONFIG 生效后由提供方发起的受保护重协商（SEC-025）；
                 // 其余是消费方发起的 T_pub 重协商，沿用原协商处理路径。
@@ -1824,8 +1990,7 @@ impl Device {
             ftype::OFFLINE => self.on_offline(now, &f, &mut out),
             ftype::ERROR => self.on_error(now, &f, &mut out),
             _ => {
-                // 已知但暂未实现（PROVISION）或未知类型：
-                // 返回结构化错误，避免被静默忽略。
+                // 已知但暂未实现或未知类型：返回结构化错误，避免被静默忽略。
                 self.counters.proto_rejects += 1;
                 self.send_error(
                     now,
@@ -1844,6 +2009,17 @@ impl Device {
                     format!("拒绝未实现帧类型 0x{:02X}", f.frame_type),
                 ));
             }
+        }
+        // 缓存本请求的应答，供重复请求原样重放（幂等，不改变状态）。
+        if let Some(key) = dup_key {
+            let replies: Vec<(Did, Frame)> = out[before..]
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Send { to, frame } => Some((*to, frame.clone())),
+                    _ => None,
+                })
+                .collect();
+            self.dup_reply.insert(key, replies);
         }
         out
     }
@@ -3468,6 +3644,23 @@ impl Device {
                 f.src,
                 format!("命令 {} 已受理", t.as_u32().unwrap_or(0)),
             ));
+        }
+        // 入网 ACK：携带 GROUP_ID（不含 COMMAND_ID）时把本机加入该组。
+        if !tlvs.iter().any(|t| t.typ == tlv_type::COMMAND_ID) {
+            if let Some(gid) = get_u16(&tlvs, tlv_type::GROUP_ID) {
+                if code == ErrCode::Ok {
+                    self.group = gid;
+                    self.counters.provision_ok += 1;
+                    if let Some(s) = self.sessions.get_mut(&f.src) {
+                        s.last_rx_ms = now;
+                    }
+                    out.push(self.trace(
+                        "provision_ok",
+                        f.src,
+                        format!("入网完成，已加入组 {gid}"),
+                    ));
+                }
+            }
         }
         let Some(sess) = self.sessions.get(&f.src).cloned() else {
             return;

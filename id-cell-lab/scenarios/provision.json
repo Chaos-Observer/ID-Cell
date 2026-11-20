@@ -1,0 +1,41 @@
+{
+  "name": "入网配网：PROVISION 变更组归属并影响组播成员（SEC-025）",
+  "duration_ms": 5000,
+  "seed": 53,
+  "key": "idcell-lab-key",
+  "link": { "delay_ms": 1, "media": "ethernet", "topology": "p2p", "t_link_min_ms": 1 },
+  "devices": [
+    {
+      "name": "gw-prov",
+      "did": "00000000-000000C1",
+      "group": 5,
+      "caps": [
+        { "index": 1, "sub": 0, "label": "网关负载", "qty": "ratio", "unit": "%", "dtype": "f64", "t_prod_ms": 100, "stale_ms": 3000 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 1.0, "amplitude": 0.0, "period_ms": 2000 }
+      ]
+    },
+    {
+      "name": "field-node",
+      "did": "00000000-000000C2",
+      "group": 0,
+      "reqs": [
+        { "qty": "ratio", "unit": "%", "want_ms": 100, "stale_ms": 3000 }
+      ]
+    }
+  ],
+  "faults": [
+    { "at_ms": 1200, "kind": "group_declare", "device": "gw-prov", "peer": "field-node", "group_id": 5, "expected": "field-node", "response_timeout_ms": 400, "group_epoch": 1 },
+    { "at_ms": 2400, "kind": "provision", "device": "field-node", "peer": "gw-prov", "group_id": 5, "intent": "现场调试入网" },
+    { "at_ms": 3400, "kind": "group_declare", "device": "gw-prov", "peer": "field-node", "group_id": 5, "expected": "field-node", "response_timeout_ms": 900, "group_epoch": 1 }
+  ],
+  "asserts": [
+    { "kind": "group_missing", "op": ">=", "value": 1, "description": "入网前不属组 5，组播判定缺席" },
+    { "kind": "provision_sent", "op": ">=", "value": 1, "description": "发起受 HMAC 保护的入网请求" },
+    { "kind": "provision_ok", "op": ">=", "value": 2, "description": "提供方受理 + 消费方应用组归属" },
+    { "kind": "group_ok", "op": ">=", "value": 1, "description": "入网后成为组 5 的可靠成员" },
+    { "kind": "group_rejects", "op": "==", "value": 0, "description": "入网流程未触发组声明拒绝" },
+    { "kind": "stage", "device": "field-node", "peer": "gw-prov", "stage": "active", "description": "入网不影响既有会话" }
+  ]
+}

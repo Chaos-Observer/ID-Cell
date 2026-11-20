@@ -1,0 +1,44 @@
+{
+  "name": "链路级确认与有界重传：控制面丢包下 3 次内恢复（NFR-026）",
+  "duration_ms": 6000,
+  "seed": 23,
+  "key": "idcell-lab-key",
+  "link": {
+    "delay_ms": 10,
+    "jitter_ms": 5,
+    "loss_ppm": 200000,
+    "media": "wifi",
+    "topology": "p2p",
+    "t_link_min_ms": 5
+  },
+  "devices": [
+    {
+      "name": "meter-01",
+      "did": "00000000-000000B1",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "累计电量", "qty": "energy", "unit": "kWh", "dtype": "f64", "t_prod_ms": 100, "stale_ms": 3000 }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 12.0, "amplitude": 1.0, "period_ms": 4000 }
+      ]
+    },
+    {
+      "name": "ems-01",
+      "did": "00000000-000000B2",
+      "link_min_ms": 5,
+      "reqs": [
+        { "qty": "energy", "unit": "kWh", "want_ms": 200, "stale_ms": 3000 }
+      ]
+    }
+  ],
+  "faults": [],
+  "asserts": [
+    { "kind": "link_ack_tx", "op": ">=", "value": 5, "description": "接收方对 NEEDACK 帧回链路 ACK" },
+    { "kind": "link_acks", "op": ">=", "value": 5, "description": "发送方收到链路 ACK 并清除待确认项" },
+    { "kind": "link_retx", "op": ">=", "value": 1, "description": "丢包触发了控制面重传" },
+    { "kind": "link_drops", "op": "==", "value": 0, "description": "重传范围内全部确认，无放弃" },
+    { "kind": "binds_ok", "op": ">=", "value": 1, "description": "20% 丢包下仍完成绑定" },
+    { "kind": "stage", "device": "ems-01", "peer": "meter-01", "stage": "active", "description": "会话进入 active" },
+    { "kind": "events_rx", "op": ">=", "value": 3, "description": "数据面在有损链路下持续到达" }
+  ]
+}

@@ -47,6 +47,8 @@ enum Event {
         /// 上一跳设备（中继广播时用于排除回程；直连为 None）。
         from: Option<usize>,
     },
+    /// 链路 ACK 超时：按 id 取待确认帧重传或放弃。
+    LinkAck(u64),
 }
 
 struct Pending {
@@ -73,6 +75,24 @@ pub struct Metrics {
     pub link_queue_ms: u64,
     /// 1ms 粒度时延直方图，末桶为溢出
     pub latency_hist: Vec<u32>,
+    /// 控制面帧的链路级重传次数（NFR-026）
+    pub link_retx: u64,
+    /// 已收到的链路级 ACK
+    pub link_acks: u64,
+    /// 重传达到上限仍未确认、被放弃的帧
+    pub link_drops: u64,
+}
+
+/// 链路确认时延与重传上限（NFR-026：控制面帧 3 次重传内成功）。
+pub const LINK_ACK_TIMEOUT_MS: u64 = 240;
+pub const LINK_MAX_RETX: u32 = 3;
+
+/// 已发出、等待链路 ACK 的帧。
+struct LinkPending {
+    from: usize,
+    to: Did,
+    frame: Frame,
+    tries: u32,
 }
 
 impl Metrics {
@@ -155,6 +175,9 @@ pub struct World {
     frames: VecDeque<FrameView>,
     /// 广播洪泛去重：`(原始 src, seq, query_id)` → 首次转发时刻。
     flood_seen: BTreeMap<(Did, u16, u32), u64>,
+    /// 待链路确认的控制面帧。
+    link_pending: BTreeMap<u64, LinkPending>,
+    next_link_id: u64,
 }
 
 impl World {
@@ -182,6 +205,8 @@ impl World {
             serial: BTreeMap::new(),
             frames: VecDeque::new(),
             flood_seen: BTreeMap::new(),
+            link_pending: BTreeMap::new(),
+            next_link_id: 1,
         }
     }
 
@@ -275,6 +300,7 @@ impl World {
                     self.push_event(next, Event::Pulse(id));
                 }
                 Event::Deliver { to, bytes, from } => self.deliver(to, bytes, from),
+                Event::LinkAck(id) => self.on_link_ack_timeout(id),
             }
         }
         self.now_ms = target;
@@ -305,6 +331,7 @@ impl World {
                 self.push_event(next, Event::Pulse(id));
             }
             Event::Deliver { to, bytes, from } => self.deliver(to, bytes, from),
+            Event::LinkAck(id) => self.on_link_ack_timeout(id),
         }
         true
     }
@@ -312,7 +339,26 @@ impl World {
     fn apply_actions(&mut self, from: usize, actions: Vec<Action>) {
         for action in actions {
             match action {
-                Action::Send { to, frame } => self.route(from, to, frame),
+                Action::Send { to, frame } => {
+                    // NFR-026：控制面帧先登记链路确认，超时按退避重传，最多 3 次。
+                    // 广播帧不登记（多接收方聚合确认超出链路层职责）。
+                    if frame.flags & idcell_core::consts::FLAG_NEEDACK != 0 && !to.is_broadcast() {
+                        let id = self.next_link_id;
+                        self.next_link_id += 1;
+                        self.link_pending.insert(
+                            id,
+                            LinkPending {
+                                from,
+                                to,
+                                frame: frame.clone(),
+                                tries: 0,
+                            },
+                        );
+                        let at = self.now_ms + LINK_ACK_TIMEOUT_MS;
+                        self.push_event(at, Event::LinkAck(id));
+                    }
+                    self.route(from, to, frame)
+                }
                 Action::LogicWrite {
                     target,
                     index,
@@ -363,6 +409,54 @@ impl World {
                 }
             }
         }
+    }
+
+    /// 链路 ACK 超时：有界重传（指数退避），达上限则放弃并计数（NFR-026）。
+    fn on_link_ack_timeout(&mut self, id: u64) {
+        let Some(mut p) = self.link_pending.remove(&id) else {
+            return;
+        };
+        let from_name = self.devices[p.from].name.clone();
+        let to_name = self
+            .did_map
+            .get(&p.to)
+            .map(|i| self.devices[*i].name.clone())
+            .unwrap_or_else(|| p.to.to_hex());
+        if p.tries >= LINK_MAX_RETX {
+            self.metrics.link_drops += 1;
+            self.trace.push(TraceEntry::new(
+                self.now_ms,
+                "link_drop",
+                &from_name,
+                &to_name,
+                ftype::name(p.frame.frame_type),
+                format!("链路重传 {} 次仍未确认，放弃", p.tries),
+            ));
+            return;
+        }
+        p.tries += 1;
+        self.metrics.link_retx += 1;
+        let backoff = LINK_ACK_TIMEOUT_MS * (1u64 << p.tries.min(3));
+        self.trace.push(TraceEntry::new(
+            self.now_ms,
+            "link_retx",
+            &from_name,
+            &to_name,
+            ftype::name(p.frame.frame_type),
+            format!("未收到链路 ACK，第 {} 次重传", p.tries),
+        ));
+        let (from, to, frame) = (p.from, p.to, p.frame.clone());
+        self.push_event(self.now_ms + backoff, Event::LinkAck(id));
+        self.link_pending.insert(id, p);
+        self.route(from, to, frame);
+    }
+
+    /// 链路 ACK 到达：清除与 (发送方, 对端, TXN) 匹配的待确认帧。
+    fn clear_link_pending(&mut self, ack_from: Did, ack_to: Did, txn: u16) {
+        self.link_pending.retain(|_, p| {
+            !(p.to == ack_from && p.frame.src == ack_to && p.frame.txn == txn)
+        });
+        self.metrics.link_acks += 1;
     }
 
     fn link_index(&self, a: usize, b: usize) -> Option<usize> {
@@ -781,6 +875,10 @@ impl World {
                 if !frame.dst.is_broadcast() && frame.dst != self.devices[to].did {
                     return;
                 }
+                // 链路级 ACK：清除匹配的待确认帧，避免无谓重传。
+                if frame.frame_type == ftype::ACK && has_link_ack(&frame.payload) {
+                    self.clear_link_pending(frame.src, frame.dst, frame.txn);
+                }
                 self.metrics.frames_rx += 1;
                 self.metrics.bytes_rx += bytes.len() as u64;
                 if frame.frame_type == ftype::EVENT && frame.ts_us > 0 {
@@ -1166,6 +1264,23 @@ impl World {
         true
     }
 
+    /// 发起入网/配网请求（PROVISION，SEC-025 HMAC 保护）。
+    pub fn request_provision(
+        &mut self,
+        device: &str,
+        peer: &str,
+        gid: u16,
+        intent: &str,
+    ) -> bool {
+        let (Some(ci), Some(pi)) = (self.resolve(device), self.resolve(peer)) else {
+            return false;
+        };
+        let peer_did = self.devices[pi].did;
+        let actions = self.devices[ci].request_provision(self.now_ms, peer_did, gid, intent);
+        self.apply_actions(ci, actions);
+        true
+    }
+
     /// 下发命令（FR-039：CMD → ACK → DONE）。
     #[allow(clippy::too_many_arguments)]
     pub fn request_command(
@@ -1307,6 +1422,29 @@ impl World {
 
     pub fn total_done_sent(&self) -> u64 {
         self.devices.iter().map(|d| d.counters.done_sent).sum()
+    }
+
+    pub fn total_link_ack_tx(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.link_ack_tx).sum()
+    }
+
+    pub fn total_dup_drops(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.dup_drops).sum()
+    }
+
+    pub fn total_provision_sent(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.provision_sent).sum()
+    }
+
+    pub fn total_provision_ok(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.provision_ok).sum()
+    }
+
+    pub fn total_provision_rejects(&self) -> u64 {
+        self.devices
+            .iter()
+            .map(|d| d.counters.provision_rejects)
+            .sum()
     }
 
     pub fn total_desc_frag_tx(&self) -> u64 {
@@ -1731,7 +1869,7 @@ impl Snapshot {
         ));
         s.push_str("\"metrics\":{");
         s.push_str(&format!(
-            "\"frames_tx\":{},\"frames_rx\":{},\"bytes_tx\":{},\"bytes_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"latency_samples\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"p50_latency_ms\":{},\"p95_latency_ms\":{},\"p99_latency_ms\":{},\"jitter_ms\":{},\"throughput_kbps\":{},\"queue_ms\":{}",
+            "\"frames_tx\":{},\"frames_rx\":{},\"bytes_tx\":{},\"bytes_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"latency_samples\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"p50_latency_ms\":{},\"p95_latency_ms\":{},\"p99_latency_ms\":{},\"jitter_ms\":{},\"throughput_kbps\":{},\"queue_ms\":{},\"link_retx\":{},\"link_acks\":{},\"link_drops\":{}",
             self.metrics.frames_tx,
             self.metrics.frames_rx,
             self.metrics.bytes_tx,
@@ -1747,7 +1885,10 @@ impl Snapshot {
             json_num(round2(self.metrics.percentile_ms(0.99))),
             json_num(round2(self.metrics.jitter_ms())),
             json_num(round2(self.metrics.throughput_kbps(self.now_ms.max(1)))),
-            self.metrics.link_queue_ms
+            self.metrics.link_queue_ms,
+            self.metrics.link_retx,
+            self.metrics.link_acks,
+            self.metrics.link_drops
         ));
         s.push_str("},\"devices\":[");
         for (i, d) in self.devices.iter().enumerate() {
@@ -1816,7 +1957,7 @@ impl Snapshot {
             }
             s.push_str("],\"counters\":{");
             s.push_str(&format!(
-                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{}",
+                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"link_ack_tx\":{},\"dup_drops\":{},\"provision_sent\":{},\"provision_ok\":{},\"provision_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{}",
                 d.counters.tx,
                 d.counters.rx,
                 d.counters.binds_ok,
@@ -1849,6 +1990,11 @@ impl Snapshot {
                 d.counters.done_rx,
                 d.counters.done_errors,
                 d.counters.cmd_rejects,
+                d.counters.link_ack_tx,
+                d.counters.dup_drops,
+                d.counters.provision_sent,
+                d.counters.provision_ok,
+                d.counters.provision_rejects,
                 d.counters.desc_frag_tx,
                 d.counters.desc_frag_rx,
                 d.counters.desc_reassemble_ok,
@@ -1979,4 +2125,11 @@ fn query_id_of(payload: &[u8]) -> u32 {
                 .and_then(|t| t.as_u32())
         })
         .unwrap_or(0)
+}
+
+/// 判断 ACK 帧是否携带链路级确认标记（与业务 ACK 区分）。
+fn has_link_ack(payload: &[u8]) -> bool {
+    decode_tlvs(payload)
+        .map(|tlvs| tlvs.iter().any(|t| t.typ == tlv_type::LINK_ACK))
+        .unwrap_or(false)
 }

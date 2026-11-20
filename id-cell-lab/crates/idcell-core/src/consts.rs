@@ -172,6 +172,8 @@ pub mod tlv_type {
     pub const DESC_FRAG_IDX: u8 = 0x63;
     /// 实验室扩展：描述符分片总数；缺省表示本次 HELLO 为未分片的完整视图。
     pub const DESC_FRAG_TOTAL: u8 = 0x64;
+    /// 实验室扩展：链路级确认标记（1=链路 ACK，非业务 ACK）。
+    pub const LINK_ACK: u8 = 0x65;
     /// 组播组号（u16/u32 大端）。
     pub const GROUP_ID: u8 = 0x7A;
     /// 组声明响应模式：0=不要求响应，1=要求响应（可靠组播）。
