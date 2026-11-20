@@ -32,7 +32,7 @@ impl RunOutcome {
         }
         let m = &self.snapshot.metrics;
         s.push_str(&format!(
-            "],\"metrics\":{{\"frames_tx\":{},\"frames_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"binds_ok\":{},\"binds_fail\":{},\"resumes_ok\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"stale_events\":{},\"timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{}}}}}",
+            "],\"metrics\":{{\"frames_tx\":{},\"frames_rx\":{},\"drops\":{},\"duplicated\":{},\"crc_errors\":{},\"avg_latency_ms\":{},\"max_latency_ms\":{},\"binds_ok\":{},\"binds_fail\":{},\"resumes_ok\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_ok\":{},\"stale_events\":{},\"timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{}}}}}",
             m.frames_tx,
             m.frames_rx,
             m.drops,
@@ -48,6 +48,7 @@ impl RunOutcome {
             bind_sum(&self.snapshot, |c| c.group_rejects),
             bind_sum(&self.snapshot, |c| c.config_ok),
             bind_sum(&self.snapshot, |c| c.config_rejects),
+            bind_sum(&self.snapshot, |c| c.reneg_ok),
             bind_sum(&self.snapshot, |c| c.stale_events),
             bind_sum(&self.snapshot, |c| c.session_timeouts),
             bind_sum(&self.snapshot, |c| c.writes_ok),

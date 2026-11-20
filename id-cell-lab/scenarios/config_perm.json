@@ -40,6 +40,7 @@
   "asserts": [
     { "kind": "config_ok", "op": ">=", "value": 1, "description": "P3 消费者可修改配置项" },
     { "kind": "config_rejects", "op": ">=", "value": 1, "description": "P1 消费者修改 P2 配置项被 E_PERM 拒绝" },
+    { "kind": "reneg_ok", "op": ">=", "value": 1, "description": "配置生效后完成受 HMAC 保护的运行期重协商" },
     { "kind": "writes_ok", "op": ">=", "value": 1, "description": "配置后数据写入仍按既有契约执行" },
     { "kind": "stage", "device": "hmi-a", "peer": "plc-a", "stage": "active", "description": "成功后会话保持 Active" },
     { "kind": "stage", "device": "hmi-b", "peer": "plc-b", "stage": "active", "description": "被拒后既有契约不受影响" }

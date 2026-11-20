@@ -71,6 +71,7 @@ fn counter(world: &World, kind: &str) -> Option<u64> {
         "group_rejects" => world.total_group_rejects(),
         "config_ok" => world.total_config_ok(),
         "config_rejects" => world.total_config_rejects(),
+        "reneg_ok" => world.total_reneg_ok(),
         "frames_tx" => m.frames_tx,
         "frames_rx" => m.frames_rx,
         "drops" => m.drops,

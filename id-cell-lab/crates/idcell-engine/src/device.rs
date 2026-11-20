@@ -305,6 +305,10 @@ pub struct DeviceCounters {
     pub config_ok: u64,
     /// CONFIG 因权限不足被拒（E_PERM）
     pub config_rejects: u64,
+    /// 已发出的 RENEGOTIATE 通知（提供方侧）
+    pub reneg_sent: u64,
+    /// 已接受并生效的 RENEGOTIATE（消费方侧，SEC-025 HMAC 校验通过）
+    pub reneg_ok: u64,
 }
 
 /// 单条查询应答（发起方聚合用）。
@@ -714,6 +718,66 @@ impl Device {
         out
     }
 
+    /// 消费方接受提供方的重协商通知：校验 HMAC 后更新契约权限与授权纪元（SEC-025）。
+    fn on_renegotiate(&mut self, now: u64, f: &Frame, out: &mut Vec<Action>) {
+        let Ok(tlvs) = decode_tlvs(&f.payload) else {
+            return;
+        };
+        let index = get_u16(&tlvs, tlv_type::INDEX).unwrap_or(0);
+        let sub = tlvs
+            .iter()
+            .find(|t| t.typ == tlv_type::INDEX)
+            .map(|t| t.sub)
+            .unwrap_or(0);
+        let new_perm = get_u8(&tlvs, tlv_type::PERM).unwrap_or(0);
+        let epoch = get_u64(&tlvs, tlv_type::GRANT_EPOCH).unwrap_or(0);
+        let bind_id = get_u32(&tlvs, tlv_type::BIND_ID).unwrap_or(0);
+        let session_id = get_u64(&tlvs, tlv_type::SESSION_ID).unwrap_or(0);
+        let nonce = tlvs
+            .iter()
+            .find(|t| t.typ == tlv_type::NONCE)
+            .map(|t| t.value.clone())
+            .unwrap_or_default();
+        let proof = tlvs
+            .iter()
+            .find(|t| t.typ == tlv_type::AUTH_PROOF)
+            .map(|t| t.value.clone())
+            .unwrap_or_default();
+        let Some(sess) = self.sessions.get(&f.src).cloned() else {
+            return;
+        };
+        let Some(contract) = sess.contract.clone() else {
+            return;
+        };
+        let nonce_arr: Option<[u8; 16]> = nonce.as_slice().try_into().ok();
+        let expected = nonce_arr.map(|n| auth_proof(&self.key, &n, session_id, f.src, self.did));
+        if sess.stage != Stage::Active
+            || contract.binding_id != bind_id
+            || contract.session_id != session_id
+            || expected.map(|e| e.to_vec()) != Some(proof)
+        {
+            out.push(self.trace(
+                "renegotiate_reject",
+                f.src,
+                "重协商校验失败（会话/绑定/HMAC 不匹配）".to_string(),
+            ));
+            return;
+        }
+        if let Some(s) = self.sessions.get_mut(&f.src) {
+            if let Some(c) = s.contract.as_mut() {
+                c.perm = new_perm;
+                c.grant_epoch = epoch;
+            }
+            s.last_rx_ms = now;
+        }
+        self.counters.reneg_ok += 1;
+        out.push(self.trace(
+            "renegotiate_ok",
+            f.src,
+            format!("已接受重协商：{index}/{sub} → P{new_perm}，授权纪元 g{epoch}"),
+        ));
+    }
+
     fn check_groups(&mut self, now: u64, out: &mut Vec<Action>) {
         let Some(r) = self.group_pending.clone() else {
             return;
@@ -902,6 +966,52 @@ impl Device {
             c.perm = new_perm;
         }
         self.counters.config_ok += 1;
+        // CONFIG 生效后主动重协商：换发新 grant_epoch 并发出受 HMAC 保护的 RENEGOTIATE（SEC-025）。
+        self.grant_epoch = self.grant_epoch.wrapping_add(1).max(1);
+        let epoch = self.grant_epoch;
+        let session_id = self
+            .sessions
+            .get(&f.src)
+            .and_then(|s| s.contract.as_ref())
+            .map(|c| c.session_id)
+            .unwrap_or(0);
+        let bind_id = self
+            .bindings
+            .get(&(f.src, index, sub))
+            .map(|b| b.binding_id)
+            .unwrap_or(0);
+        if let Some(s) = self.sessions.get_mut(&f.src) {
+            if let Some(c) = s.contract.as_mut() {
+                c.perm = new_perm;
+                c.grant_epoch = epoch;
+            }
+            s.last_rx_ms = now;
+        }
+        let txn = self.next_txn();
+        let nonce = make_nonce(self.did, now, txn);
+        let proof = auth_proof(&self.key, &nonce, session_id, self.did, f.src);
+        let mut rw = TlvWriter::new();
+        rw.put_u16(index, sub, tlv_type::INDEX, index);
+        rw.field_u8(tlv_type::PERM, new_perm);
+        rw.field_u64(tlv_type::GRANT_EPOCH, epoch);
+        rw.field_u32(tlv_type::BIND_ID, bind_id);
+        rw.field_u64(tlv_type::SESSION_ID, session_id);
+        let _ = rw.raw_put(0, 0, tlv_type::NONCE, &nonce);
+        let _ = rw.raw_put(0, 0, tlv_type::AUTH_PROOF, &proof);
+        out.push(self.frame_flags(
+            now,
+            ftype::RENEGOTIATE,
+            f.src,
+            txn,
+            rw.finish(),
+            idcell_core::consts::FLAG_AUTH,
+        ));
+        self.counters.reneg_sent += 1;
+        out.push(self.trace(
+            "renegotiate",
+            f.src,
+            format!("配置生效，发起重协商：P{new_perm}，g{epoch}"),
+        ));
         let mut w = TlvWriter::new();
         w.field_u8(tlv_type::RESULT, ErrCode::Ok as u8);
         w.put_u16(index, sub, tlv_type::INDEX, index);
@@ -1428,7 +1538,7 @@ impl Device {
             ftype::DISCOVER => self.on_discover(now, &f, &mut out),
             ftype::HELLO => self.on_hello(now, &f, &mut out),
             ftype::MATCH => self.on_match(now, &f, &mut out),
-            ftype::NEGOTIATE | ftype::RENEGOTIATE => self.on_negotiate(now, &f, &mut out),
+            ftype::NEGOTIATE => self.on_negotiate(now, &f, &mut out),
             ftype::AUTH => self.on_auth(now, &f, &mut out),
             ftype::BIND => self.on_bind(now, &f, &mut out),
             ftype::READ => self.on_read(now, &f, &mut out),
@@ -1442,6 +1552,15 @@ impl Device {
             ftype::EVENT => self.on_event(now, &f, &mut out),
             ftype::GROUP => self.on_group(now, &f, &mut out),
             ftype::CONFIG => self.on_config(now, &f, &mut out),
+            ftype::RENEGOTIATE => {
+                // 带 AUTH 标志的是 CONFIG 生效后由提供方发起的受保护重协商（SEC-025）；
+                // 其余是消费方发起的 T_pub 重协商，沿用原协商处理路径。
+                if f.flags & idcell_core::consts::FLAG_AUTH != 0 {
+                    self.on_renegotiate(now, &f, &mut out)
+                } else {
+                    self.on_negotiate(now, &f, &mut out)
+                }
+            }
             ftype::QUERY => self.on_query(now, &f, &mut out),
             ftype::REPLY => self.on_reply(now, &f, &mut out),
             ftype::REPLY_END => self.on_reply_end(now, &f, &mut out),

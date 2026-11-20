@@ -1252,6 +1252,10 @@ impl World {
         self.devices.iter().map(|d| d.counters.config_rejects).sum()
     }
 
+    pub fn total_reneg_ok(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.reneg_ok).sum()
+    }
+
     /// 某设备对 peer 的会话是否走了描述缓存复用路径（FR-028）。
     pub fn session_resumed(&self, device: &str, peer: &str) -> bool {
         let Some(d) = self.device(device) else {
@@ -1739,7 +1743,7 @@ impl Snapshot {
             }
             s.push_str("],\"counters\":{");
             s.push_str(&format!(
-                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"logic_fired\":{}",
+                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"logic_fired\":{}",
                 d.counters.tx,
                 d.counters.rx,
                 d.counters.binds_ok,
@@ -1763,6 +1767,8 @@ impl Snapshot {
                 d.counters.group_rejects,
                 d.counters.config_ok,
                 d.counters.config_rejects,
+                d.counters.reneg_sent,
+                d.counters.reneg_ok,
                 d.counters.logic_fired
             ));
             s.push_str("},\"queries\":[");
