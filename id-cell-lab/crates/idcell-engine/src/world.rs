@@ -1332,11 +1332,27 @@ impl World {
         value: f64,
         intent: &str,
     ) -> bool {
+        self.request_write_in(consumer, provider, index, sub, value, "", intent)
+    }
+
+    /// 带来源单位的写入：提供方做应用层单位换算。
+    pub fn request_write_in(
+        &mut self,
+        consumer: &str,
+        provider: &str,
+        index: u16,
+        sub: u8,
+        value: f64,
+        unit: &str,
+        intent: &str,
+    ) -> bool {
         let (Some(ci), Some(pi)) = (self.resolve(consumer), self.resolve(provider)) else {
             return false;
         };
         let peer = self.devices[pi].did;
-        let actions = self.devices[ci].request_write(self.now_ms, peer, index, sub, value, intent);
+        let actions = self
+            .devices[ci]
+            .request_write_in(self.now_ms, peer, index, sub, value, unit, intent);
         self.apply_actions(ci, actions);
         true
     }
@@ -1748,6 +1764,32 @@ impl World {
 
     pub fn total_writes_rejected(&self) -> u64 {
         self.devices.iter().map(|d| d.counters.writes_rejected).sum()
+    }
+
+    /// WRITE 完成应用层单位换算的次数。
+    pub fn total_writes_converted(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.writes_converted).sum()
+    }
+
+    /// WRITE 因单位不可换算被拒的次数。
+    pub fn total_writes_unit_rejected(&self) -> u64 {
+        self.devices
+            .iter()
+            .map(|d| d.counters.writes_unit_rejected)
+            .sum()
+    }
+
+    /// 通信失效后执行失效安全输出的次数。
+    pub fn total_fail_safe_actions(&self) -> u64 {
+        self.devices
+            .iter()
+            .map(|d| d.counters.fail_safe_actions)
+            .sum()
+    }
+
+    /// 被保持/触发语义抑制的发布次数。
+    pub fn total_hold_suppressed(&self) -> u64 {
+        self.devices.iter().map(|d| d.counters.hold_suppressed).sum()
     }
 
     pub fn total_events_rx(&self) -> u64 {
@@ -2274,7 +2316,7 @@ impl Snapshot {
             }
             s.push_str("],\"counters\":{");
             s.push_str(&format!(
-                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"link_ack_tx\":{},\"dup_drops\":{},\"provision_sent\":{},\"provision_ok\":{},\"provision_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{},\"actuator_moves\":{},\"state_changes\":{},\"alarms_raised\":{},\"alarms_cleared\":{}",
+                "\"tx\":{},\"rx\":{},\"binds_ok\":{},\"binds_fail\":{},\"retries\":{},\"stale_events\":{},\"session_timeouts\":{},\"writes_ok\":{},\"writes_rejected\":{},\"events_rx\":{},\"asleep_drops\":{},\"queries_sent\":{},\"replies_rx\":{},\"queries_answered\":{},\"query_timeouts\":{},\"proto_rejects\":{},\"resumes_ok\":{},\"group_rounds\":{},\"group_ok\":{},\"group_missing\":{},\"group_rejects\":{},\"config_ok\":{},\"config_rejects\":{},\"reneg_sent\":{},\"reneg_ok\":{},\"cmds_sent\":{},\"commands_rx\":{},\"cmd_acks\":{},\"done_sent\":{},\"done_rx\":{},\"done_errors\":{},\"cmd_rejects\":{},\"link_ack_tx\":{},\"dup_drops\":{},\"provision_sent\":{},\"provision_ok\":{},\"provision_rejects\":{},\"desc_frag_tx\":{},\"desc_frag_rx\":{},\"desc_reassemble_ok\":{},\"desc_crc_errors\":{},\"desc_oversize\":{},\"logic_fired\":{},\"actuator_moves\":{},\"state_changes\":{},\"alarms_raised\":{},\"alarms_cleared\":{},\"writes_converted\":{},\"writes_unit_rejected\":{},\"fail_safe_actions\":{},\"hold_suppressed\":{}",
                 d.counters.tx,
                 d.counters.rx,
                 d.counters.binds_ok,
@@ -2321,7 +2363,11 @@ impl Snapshot {
                 d.counters.actuator_moves,
                 d.counters.state_changes,
                 d.counters.alarms_raised,
-                d.counters.alarms_cleared
+                d.counters.alarms_cleared,
+                d.counters.writes_converted,
+                d.counters.writes_unit_rejected,
+                d.counters.fail_safe_actions,
+                d.counters.hold_suppressed
             ));
             s.push_str("},\"queries\":[");
             for (j, q) in d.queries.iter().enumerate() {

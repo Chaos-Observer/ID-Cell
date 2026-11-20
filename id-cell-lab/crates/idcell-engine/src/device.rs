@@ -393,6 +393,14 @@ pub struct DeviceCounters {
     pub provision_ok: u64,
     /// 入网被拒（会话未 active、HMAC 失败、组号非法）
     pub provision_rejects: u64,
+    /// WRITE 携带来源单位并完成应用层换算（conv_class + accept_units）。
+    pub writes_converted: u64,
+    /// WRITE 单位不可换算被拒（量种不符/未知单位/未声明）。
+    pub writes_unit_rejected: u64,
+    /// 通信失效后执行失效安全动作的次数（fail_action）。
+    pub fail_safe_actions: u64,
+    /// 因保持/触发语义（稳定保持、按需、未变化）抑制的发布次数。
+    pub hold_suppressed: u64,
 }
 
 /// 单条查询应答（发起方聚合用）。
@@ -2147,7 +2155,7 @@ impl Device {
             if s.stage == Stage::Active {
                 if now.saturating_sub(s.last_rx_ms) > LINK_TIMEOUT_MS {
                     self.counters.session_timeouts += 1;
-                    self.mark_session_lost(peer, now, &s);
+                    self.mark_session_lost(peer, now, &s, out);
                     out.push(self.trace(
                         "offline",
                         peer,
@@ -2171,7 +2179,7 @@ impl Device {
         }
     }
 
-    fn mark_session_lost(&mut self, peer: Did, now: u64, s: &Session) {
+    fn mark_session_lost(&mut self, peer: Did, now: u64, s: &Session, out: &mut Vec<Action>) {
         if s.role == Role::Consumer {
             for v in self.recv.values_mut() {
                 v.stale = true;
@@ -2184,10 +2192,63 @@ impl Device {
                 self.owner = None;
             }
         }
+        // 本端作为提供者失去消费者：输出点按 fail_action 进入失效安全位。
+        if s.role == Role::Provider {
+            self.apply_fail_safe_all(now, "会话丢失", out);
+        }
         if let Some(sess) = self.sessions.get_mut(&peer) {
             sess.stage = Stage::Closed;
             sess.error = Some(ErrCode::Unavailable);
         }
+    }
+
+    /// 通信失效后的失效安全输出：fail_action 0=保持 1=安全值(量程下限) 2=归零。
+    fn apply_fail_safe_all(&mut self, now: u64, reason: &str, out: &mut Vec<Action>) {
+        let keys: Vec<(u16, u8)> = self
+            .caps
+            .iter()
+            .filter(|c| c.writable() && c.fail_action != 0)
+            .map(|c| (c.index, c.sub))
+            .collect();
+        for key in keys {
+            self.apply_fail_safe_key(now, key, reason, out);
+        }
+    }
+
+    fn apply_fail_safe_key(
+        &mut self,
+        now: u64,
+        key: (u16, u8),
+        reason: &str,
+        out: &mut Vec<Action>,
+    ) {
+        let Some(cap) = self.cap(key.0, key.1).cloned() else {
+            return;
+        };
+        if cap.fail_action == 0 {
+            return;
+        }
+        let target = if cap.fail_action == 2 { 0.0 } else { cap.range.0 };
+        // 正在运动的执行器立即停止，避免继续保持旧目标。
+        self.act_states.remove(&key);
+        if let Some(p) = self.points.get_mut(&key) {
+            p.value = target;
+            p.ts_ms = now;
+            p.quality = quality::UNCERTAIN;
+        }
+        self.record_hist(key, now);
+        self.counters.fail_safe_actions += 1;
+        out.push(self.trace(
+            "fail_safe",
+            Did::broadcast(),
+            format!(
+                "通信失效（{reason}）：输出 {}/{} {} = {:.3}",
+                key.0,
+                key.1,
+                if cap.fail_action == 2 { "归零" } else { "置安全值" },
+                target
+            ),
+        ));
     }
 
     fn check_leases(&mut self, now: u64, out: &mut Vec<Action>) {
@@ -2213,6 +2274,8 @@ impl Device {
         w.put_u16(owner.index, owner.sub, tlv_type::INDEX, owner.index);
         out.push(self.frame(now, ftype::LEASE, owner.peer, txn, w.finish()));
         out.push(self.trace("lease_expired", owner.peer, "写租约 TTL 到期，所有权释放"));
+        // 租约过期说明控制方已停止续约：输出点按 fail_action 进入失效安全位。
+        self.apply_fail_safe_key(now, (owner.index, owner.sub), "写租约过期", out);
     }
 
     fn check_consumer_stale(&mut self, now: u64, out: &mut Vec<Action>) {
@@ -2307,11 +2370,37 @@ impl Device {
                 continue;
             };
             let t_pub = contract.t_pub_ms.max(1) as u64;
-            if now < s.last_pub_ms + t_pub {
+            let gap_ok = now >= s.last_pub_ms + t_pub;
+            let changed = s.last_pub_ts == 0 || point.ts_ms != s.last_pub_ts;
+            // 触发语义：0=LEVEL 周期上报，1=EDGE 变化上报，2=BOTH 变化即时+周期刷新。
+            let due = match cap.trigger {
+                1 => changed && gap_ok,
+                2 => changed || gap_ok,
+                _ => gap_ok,
+            };
+            if !due {
+                // EDGE 未变化：也推进评估时标，避免下一轮 1ms 空转唤醒。
+                if gap_ok {
+                    if let Some(sess) = self.sessions.get_mut(&peer) {
+                        sess.last_pub_ms = now;
+                    }
+                }
                 continue;
             }
-            // 值未更新就不发，绝不重复旧值伪装刷新。
-            if s.last_pub_ts != 0 && point.ts_ms == s.last_pub_ts {
+            // 发布节奏统一按 T_pub 评估；进入评估窗口后推进时标，避免被抑制时 1ms 空转。
+            if gap_ok {
+                if let Some(sess) = self.sessions.get_mut(&peer) {
+                    sess.last_pub_ms = now;
+                }
+            }
+            // 保持语义 2：按需提供，只响应 READ/QUERY，不主动发布。
+            if cap.hold_semantics == 2 {
+                self.counters.hold_suppressed += 1;
+                continue;
+            }
+            // 保持语义 1：值必须稳定满一个 T_pub 才允许上报，滤掉抖动。
+            if cap.hold_semantics == 1 && now.saturating_sub(point.ts_ms) < t_pub {
+                self.counters.hold_suppressed += 1;
                 continue;
             }
             let txn = self.next_txn();
@@ -3693,11 +3782,54 @@ impl Device {
             out.push(self.trace("write_reject", f.src, "写被拒：缺少意图 → E_PERM".to_string()));
             return;
         }
-        let Some(value) = value else {
+        let Some(mut value) = value else {
             self.counters.writes_rejected += 1;
             self.send_error(now, f.src, ErrCode::Ctx, "WRITE 缺少可解释的值载荷", out);
             return;
         };
+        // 应用层单位换算：写入方可按 accept_units 声明的单位表达，提供方换算到规范单位。
+        let src_unit = get_str(&tlvs, tlv_type::UNIT).unwrap_or_default();
+        if !src_unit.is_empty() && !src_unit.eq_ignore_ascii_case(&cap.unit) {
+            let declared = cap.accept_units.is_empty()
+                || cap
+                    .accept_units
+                    .iter()
+                    .any(|u| u.eq_ignore_ascii_case(&src_unit));
+            let need = idcell_core::units::conv_class(cap.qty, cap.qty, &src_unit, &cap.unit);
+            if !declared || need == 0 || need > cap.conv_class {
+                self.counters.writes_rejected += 1;
+                self.counters.writes_unit_rejected += 1;
+                self.send_error(
+                    now,
+                    f.src,
+                    ErrCode::Unit,
+                    &format!("单位 {src_unit} 不可换算为 {}（conv_class={}）", cap.unit, cap.conv_class),
+                out);
+                out.push(self.trace(
+                    "write_reject",
+                    f.src,
+                    format!("写被拒：单位 {src_unit} → {} 不在换算能力内 → E_UNIT", cap.unit),
+                ));
+                return;
+            }
+            match idcell_core::units::convert(cap.qty, cap.qty, &src_unit, &cap.unit, value) {
+                Ok(v) => {
+                    self.counters.writes_converted += 1;
+                    out.push(self.trace(
+                        "write_convert",
+                        f.src,
+                        format!("单位换算 {value:.3} {src_unit} → {v:.3} {}", cap.unit),
+                    ));
+                    value = v;
+                }
+                Err(e) => {
+                    self.counters.writes_rejected += 1;
+                    self.counters.writes_unit_rejected += 1;
+                    self.send_error(now, f.src, ErrCode::Unit, &e.to_string(), out);
+                    return;
+                }
+            }
+        }
         if value < cap.range.0 || value > cap.range.1 {
             self.counters.writes_rejected += 1;
             let mut w = TlvWriter::new();
@@ -4449,6 +4581,20 @@ impl Device {
         value: f64,
         intent: &str,
     ) -> Vec<Action> {
+        self.request_write_in(now, peer, index, sub, value, "", intent)
+    }
+
+    /// 带来源单位的写入：提供方按 conv_class/accept_units 做应用层换算。
+    pub fn request_write_in(
+        &mut self,
+        now: u64,
+        peer: Did,
+        index: u16,
+        sub: u8,
+        value: f64,
+        unit: &str,
+        intent: &str,
+    ) -> Vec<Action> {
         let token = self
             .sessions
             .get(&peer)
@@ -4468,6 +4614,9 @@ impl Device {
         w.put_u16(index, sub, tlv_type::INDEX, index);
         let raw = encode_value(dtype, scale, value);
         let _ = w.raw_put(index, sub, tlv_type::VALUE, &raw);
+        if !unit.is_empty() {
+            w.field_str(tlv_type::UNIT, unit);
+        }
         w.field_u32(tlv_type::OWNER, token);
         w.field_str(tlv_type::INTENT, intent);
         w.field_u32(tlv_type::VALID_FOR, DEFAULT_TTL_MS / 2);

@@ -377,6 +377,7 @@ fn inject_fault(sim: &Arc<Mutex<Sim>>, body: &[u8]) -> Result<String, String> {
         intent: json
             .str_field("intent")
             .unwrap_or_else(|| "panel-write".into()),
+        unit: json.str_field("unit").unwrap_or_default(),
         selector: json.str_field("selector").unwrap_or_else(|| "*".into()),
         mode: match json.str_field("mode").as_deref() {
             Some("first") => idcell_core::consts::query_mode::FIRST,

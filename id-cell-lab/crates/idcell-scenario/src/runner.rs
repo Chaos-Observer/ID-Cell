@@ -98,12 +98,13 @@ pub fn apply_fault(world: &mut World, f: &FaultDef) -> Result<(), String> {
         "power_off" => world.set_device_power(&f.device, false),
         "power_on" => world.set_device_power(&f.device, true),
         "read" => world.request_read(&f.device, &f.peer, f.index, f.sub),
-        "write" => world.request_write(
+        "write" => world.request_write_in(
             &f.device,
             &f.peer,
             f.index,
             f.sub,
             f.value,
+            &f.unit,
             &f.intent,
         ),
         "renegotiate" => world.request_renegotiate(&f.device, &f.peer, f.value as u32),

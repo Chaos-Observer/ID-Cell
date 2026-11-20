@@ -135,6 +135,8 @@ pub struct CapDef {
     pub trigger: u8,
     pub provenance: u8,
     pub conv_class: u8,
+    /// 保持语义：0=立即 1=稳定保持(稳定满 T_pub 才发布) 2=按需(仅 READ/QUERY)。
+    pub hold_semantics: u8,
     pub precision: f64,
     pub frame_ref: String,
     pub invertible: bool,
@@ -462,6 +464,7 @@ impl CapDef {
         c.trigger = self.trigger;
         c.provenance = self.provenance;
         c.fail_action = self.fail_action;
+        c.hold_semantics = self.hold_semantics;
         c
     }
 }
@@ -500,6 +503,8 @@ pub struct FaultDef {
     pub sub: u8,
     pub value: f64,
     pub intent: String,
+    /// write 故障：来源单位（空表示按提供方规范单位写入）。
+    pub unit: String,
     /// query 故障：选择器文本与模式
     pub selector: String,
     pub mode: u8,
@@ -817,6 +822,7 @@ fn parse_cap(v: &Json, i: usize) -> Result<CapDef, String> {
         trigger: v.u64_field("trigger").unwrap_or(0) as u8,
         provenance: v.u64_field("prov").unwrap_or(0) as u8,
         conv_class: v.u64_field("conv").unwrap_or(1) as u8,
+        hold_semantics: v.u64_field("hold").unwrap_or(0) as u8,
         precision: v.f64_field("precision").unwrap_or(0.0),
         frame_ref: v.str_field("frame").unwrap_or_default(),
         invertible: v.bool_field("invertible").unwrap_or(false),
@@ -895,6 +901,7 @@ fn parse_fault(v: &Json) -> Result<FaultDef, String> {
         intent: v
             .str_field("intent")
             .unwrap_or_else(|| "scenario-write".to_string()),
+        unit: v.str_field("unit").unwrap_or_default(),
         selector: v
             .str_field("selector")
             .unwrap_or_else(|| "*".to_string()),

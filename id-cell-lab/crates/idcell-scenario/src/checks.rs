@@ -12,6 +12,7 @@
 //!   queries_sent / replies_rx / queries_answered / query_timeouts —— 查询计数器
 //!   query_replies —— 指定 device 聚合到的应答条数（device 字段）
 //!   value        —— device 收到的点值（index/sub），带容差
+//!   point        —— device 本地维护的点值（index/sub），带容差
 //!   frame        —— 帧类型计数，frame 字段为类型名（如 EVENT）
 
 use crate::model::AssertDef;
@@ -58,6 +59,10 @@ fn counter(world: &World, kind: &str) -> Option<u64> {
         "timeouts" => world.total_timeouts(),
         "writes_ok" => world.total_writes_ok(),
         "writes_rejected" => world.total_writes_rejected(),
+        "writes_converted" => world.total_writes_converted(),
+        "writes_unit_rejected" => world.total_writes_unit_rejected(),
+        "fail_safe_actions" => world.total_fail_safe_actions(),
+        "hold_suppressed" => world.total_hold_suppressed(),
         "events_rx" => world.total_events_rx(),
         "queries_sent" => world.total_queries_sent(),
         "replies_rx" => world.total_replies_rx(),
@@ -195,6 +200,20 @@ pub fn evaluate_one(world: &World, def: &AssertDef) -> AssertResult {
             result.detail = format!(
                 "{} 点 ({},{}) 报警等级 {} {} {}",
                 def.device, def.index, def.sub, level, def.op, def.value
+            );
+        }
+        "point" => {
+            let Some(p) = world
+                .device(&def.device)
+                .and_then(|d| d.points.get(&(def.index, def.sub)))
+            else {
+                result.detail = format!("{} 无本地点 ({},{})", def.device, def.index, def.sub);
+                return result;
+            };
+            result.passed = compare(&def.op, p.value, def.value, def.tolerance);
+            result.detail = format!(
+                "{} 本地点 ({},{}) 值 {:.3} {} {:.3}（质量 {}）",
+                def.device, def.index, def.sub, p.value, def.op, def.value, p.quality
             );
         }
         "value" => {

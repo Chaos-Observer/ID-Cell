@@ -1,0 +1,98 @@
+{
+  "name": "能力语义：触发/保持/单位换算/失效安全",
+  "duration_ms": 8000,
+  "seed": 53,
+  "key": "idcell-lab-key",
+  "require_link": true,
+  "link": { "delay_ms": 1, "media": "ethernet", "topology": "p2p", "t_link_min_ms": 1 },
+  "devices": [
+    {
+      "name": "temp-01",
+      "did": "00000000-00000211",
+      "caps": [
+        { "index": 1, "sub": 0, "label": "车间温度", "qty": "temperature", "unit": "Cel", "dtype": "f64", "scale": 2, "t_prod_ms": 200, "stale_ms": 3000, "trigger": 1, "range": [0, 100] }
+      ],
+      "values": [
+        { "index": 1, "sub": 0, "base": 21.0, "amplitude": 2.0, "period_ms": 4000 }
+      ]
+    },
+    {
+      "name": "vib-01",
+      "did": "00000000-00000214",
+      "caps": [
+        { "index": 2, "sub": 0, "label": "振动加速度", "qty": "acceleration", "unit": "m/s2", "dtype": "f64", "scale": 2, "t_prod_ms": 300, "stale_ms": 3000, "trigger": 1, "hold": 1, "range": [-20, 20] }
+      ],
+      "values": [
+        { "index": 2, "sub": 0, "base": 0.0, "amplitude": 1.0, "period_ms": 120 }
+      ]
+    },
+    {
+      "name": "pres-01",
+      "did": "00000000-00000215",
+      "caps": [
+        { "index": 3, "sub": 0, "label": "管网压力", "qty": "pressure", "unit": "kPa", "dtype": "f64", "scale": 2, "t_prod_ms": 300, "stale_ms": 3000, "hold": 2, "range": [0, 100] }
+      ],
+      "values": [
+        { "index": 3, "sub": 0, "base": 3.2, "amplitude": 0.0, "period_ms": 1000 }
+      ]
+    },
+    {
+      "name": "lux-01",
+      "did": "00000000-00000216",
+      "caps": [
+        { "index": 8, "sub": 0, "label": "照度", "qty": "luminosity", "unit": "cd", "dtype": "f64", "scale": 1, "t_prod_ms": 200, "stale_ms": 3000, "trigger": 0, "range": [0, 1000] }
+      ],
+      "values": [
+        { "index": 8, "sub": 0, "base": 120.0, "amplitude": 0.0, "period_ms": 1000 }
+      ]
+    },
+    {
+      "name": "valve-01",
+      "did": "00000000-00000212",
+      "caps": [
+        { "index": 4, "sub": 0, "label": "调节阀开度", "qty": "ratio", "unit": "%", "dtype": "f64", "perm": 3, "dir": 3, "conv": 1, "t_prod_ms": 200, "stale_ms": 3000, "trigger": 1, "fail_action": 1, "range": [0, 100] }
+      ],
+      "values": [
+        { "index": 4, "sub": 0, "base": 0.0, "amplitude": 0.0, "period_ms": 1000 }
+      ],
+      "actuators": [
+        { "point": "4.0", "travel_ms": 0, "initial": 0.0 }
+      ]
+    },
+    {
+      "name": "ctrl-01",
+      "did": "00000000-00000213",
+      "preempt": true,
+      "reqs": [
+        { "qty": "temperature", "unit": "Cel", "range": [0, 100], "want_ms": 200, "stale_ms": 3000 },
+        { "qty": "acceleration", "unit": "m/s2", "range": [-20, 20], "want_ms": 300, "stale_ms": 3000 },
+        { "qty": "pressure", "unit": "kPa", "range": [0, 100], "want_ms": 300, "stale_ms": 3000 },
+        { "qty": "luminosity", "unit": "cd", "range": [0, 1000], "want_ms": 200, "stale_ms": 3000 },
+        { "qty": "ratio", "unit": "%", "kind": 1, "want_ms": 200, "stale_ms": 3000, "range": [0, 100] }
+      ]
+    }
+  ],
+  "links": [
+    { "a": "temp-01", "b": "ctrl-01" },
+    { "a": "vib-01", "b": "ctrl-01" },
+    { "a": "pres-01", "b": "ctrl-01" },
+    { "a": "lux-01", "b": "ctrl-01" },
+    { "a": "valve-01", "b": "ctrl-01" }
+  ],
+  "faults": [
+    { "at_ms": 500, "kind": "write", "device": "ctrl-01", "peer": "valve-01", "index": 4, "sub": 0, "value": 0.8, "unit": "1", "intent": "按无量纲比例设置开度" },
+    { "at_ms": 700, "kind": "write", "device": "ctrl-01", "peer": "valve-01", "index": 4, "sub": 0, "value": 5.0, "unit": "Cel", "intent": "量种不符的越界单位" },
+    { "at_ms": 2000, "kind": "query", "device": "ctrl-01", "selector": "3-3/0", "mode": "all" },
+    { "at_ms": 3000, "kind": "partition", "a": "ctrl-01", "b": "valve-01" }
+  ],
+  "asserts": [
+    { "kind": "stage", "device": "ctrl-01", "peer": "temp-01", "stage": "active", "description": "控制器与温度源完成绑定并保持 Active" },
+    { "kind": "writes_converted", "op": ">=", "value": 1, "description": "0.8（无量纲）换算为 80% 后写入" },
+    { "kind": "writes_unit_rejected", "op": ">=", "value": 1, "description": "量种不符的单位被 E_UNIT 拒绝" },
+    { "kind": "hold_suppressed", "op": ">=", "value": 5, "description": "稳定保持与按需点按语义抑制主动发布" },
+    { "kind": "query_replies", "device": "ctrl-01", "op": ">=", "value": 1, "description": "按需保持点通过 QUERY 提供当前值" },
+    { "kind": "events_rx", "op": ">=", "value": 20, "description": "LEVEL 触发点周期刷新，EDGE 点变化上报" },
+    { "kind": "fail_safe_actions", "op": ">=", "value": 1, "description": "链路中断后输出进入失效安全位" },
+    { "kind": "point", "device": "valve-01", "index": 4, "sub": 0, "op": "<=", "value": 0.1, "tolerance": 0.0, "description": "通信失效后开度回到安全值 0%" }
+  ]
+}
